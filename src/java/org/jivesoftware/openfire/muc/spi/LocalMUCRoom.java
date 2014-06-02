@@ -530,13 +530,15 @@ public class LocalMUCRoom implements MUCRoom {
         }
         LocalMUCRole joinRole = null;
         lock.writeLock().lock();
+        boolean spoofJoin = false;
+        // A "spoof join" here is one where the client is already joined, but has re-joined.
         try {
             // If the room has a limit of max user then check if the limit has been reached
             if (!canJoinRoom(user)) {
                 throw new ServiceUnavailableException();
             }
             final JID bareJID = user.getAddress().asBareJID();
-			boolean isOwner = owners.contains(bareJID);
+            boolean isOwner = owners.contains(bareJID);
             // If the room is locked and this user is not an owner raise a RoomLocked exception
             if (isLocked()) {
                 if (!isOwner) {
@@ -550,6 +552,9 @@ public class LocalMUCRoom implements MUCRoom {
                 if (occupant != null && !occupant.getUserAddress().toBareJID().equals(bareJID.toBareJID())) {
                     // Nickname is already used, and not by the same JID
                     throw new UserAlreadyExistsException();
+                }
+                if (occupant.getUserAddress().equals(user.getAddress())) {
+                    spoofJoin = true; // This user is already an occupant. The client thinks it isn't. (Or else this is a broken gmail).
                 }
             }
             // If the room is password protected and the provided password is incorrect raise a
@@ -611,23 +616,29 @@ public class LocalMUCRoom implements MUCRoom {
                 role = (isModerated() ? MUCRole.Role.visitor : MUCRole.Role.participant);
                 affiliation = MUCRole.Affiliation.none;
             }
-            // Create a new role for this user in this room
-            joinRole = new LocalMUCRole(mucService, this, nickname, role, affiliation, user, presence, router);
-            // Add the new user as an occupant of this room
-            List<MUCRole> occupants = occupantsByNickname.get(nickname.toLowerCase());
-            if (occupants == null) {
-            	occupants = new ArrayList<MUCRole>();
-            	occupantsByNickname.put(nickname.toLowerCase(), occupants);
-            }
-            occupants.add(joinRole);
-            // Update the tables of occupants based on the bare and full JID
-            List<MUCRole> list = occupantsByBareJID.get(bareJID);
-            if (list == null) {
-                list = new ArrayList<MUCRole>();
-                occupantsByBareJID.put(bareJID, list);
-            }
-            list.add(joinRole);
-            occupantsByFullJID.put(user.getAddress(), joinRole);
+            if (!spoofJoin) {
+                // Create a new role for this user in this room
+                joinRole = new LocalMUCRole(mucService, this, nickname, role,
+                        affiliation, user, presence, router);
+                // Add the new user as an occupant of this room
+                List<MUCRole> occupants = occupantsByNickname.get(nickname.toLowerCase());
+                if (occupants == null) {
+                    occupants = new ArrayList<MUCRole>();
+                    occupantsByNickname.put(nickname.toLowerCase(), occupants);
+                }
+                occupants.add(joinRole);
+                // Update the tables of occupants based on the bare and full JID
+                List<MUCRole> list = occupantsByBareJID.get(bareJID);
+                if (list == null) {
+                    list = new ArrayList<MUCRole>();
+                    occupantsByBareJID.put(bareJID, list);
+                }
+                list.add(joinRole);
+                occupantsByFullJID.put(user.getAddress(), joinRole);
+            } else {
+                // Grab the existing one.
+                joinRole = (LocalMUCRole) occupantsByFullJID.get(user.getAddress());
+           }
         }
         finally {
             lock.writeLock().unlock();
@@ -667,10 +678,13 @@ public class LocalMUCRoom implements MUCRoom {
         else {
             historyRequest.sendHistory(joinRole, roomHistory);
         }
-        // Update the date when the last occupant left the room
-        setEmptyDate(null);
-        // Fire event that occupant joined the room
-        MUCEventDispatcher.occupantJoined(getRole().getRoleAddress(), user.getAddress(), joinRole.getNickname());
+        if (!spoofJoin) {
+            // Update the date when the last occupant left the room
+            setEmptyDate(null);
+            // Fire event that occupant joined the room
+            MUCEventDispatcher.occupantJoined(getRole().getRoleAddress(),
+                    user.getAddress(), joinRole.getNickname());
+       }
         return joinRole;
     }
 
