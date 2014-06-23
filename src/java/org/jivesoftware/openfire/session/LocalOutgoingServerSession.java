@@ -118,15 +118,15 @@ public class LocalOutgoingServerSession extends LocalServerSession implements Ou
      * @param hostname the hostname of the remote server.
      * @return True if the domain was authenticated by the remote server.
      */
-    public static boolean authenticateDomain(String domain, String hostname) {
+    public static OutgoingServerSession authenticateDomain(String domain, String hostname) {
         if (hostname == null || hostname.length() == 0 || hostname.trim().indexOf(' ') > -1) {
             // Do nothing if the target hostname is empty, null or contains whitespaces
-            return false;
+            return null;
         }
         try {
             // Check if the remote hostname is in the blacklist
             if (!RemoteServerManager.canAccess(hostname)) {
-                return false;
+                return null;
             }
 
             OutgoingServerSession session;
@@ -136,7 +136,7 @@ public class LocalOutgoingServerSession extends LocalServerSession implements Ou
             SessionManager sessionManager = SessionManager.getInstance();
             if (sessionManager == null) {
                 // Server is shutting down while we are trying to create a new s2s connection
-                return false;
+                return null;
             }
             session = sessionManager.getOutgoingServerSession(hostname);
             if (session == null) {
@@ -169,26 +169,26 @@ public class LocalOutgoingServerSession extends LocalServerSession implements Ou
                         session.addHostname(hostname);
                         // Notify the SessionManager that a new session has been created
                         sessionManager.outgoingServerSessionCreated((LocalOutgoingServerSession) session);
-                        return true;
+                        return session;
                     }
                 } else {
                     Log.warn("Fail to connect to {} for {}", hostname, domain);
-                    return false;
+                    return null;
                 }
             }
             // A session already exists. The session was established using server dialback so
             // it is possible to do piggybacking to authenticate more domains
             if (session.getAuthenticatedDomains().contains(domain) && session.getHostnames().contains(hostname)) {
                 // Do nothing since the domain has already been authenticated
-                return true;
+                return session;
             }
             // A session already exists so authenticate the domain using that session
-            return session.authenticateSubdomain(domain, hostname);
+            if (session.authenticateSubdomain(domain, hostname)) return session;
         }
         catch (Exception e) {
             Log.error("Error authenticating domain with remote server: " + hostname, e);
         }
-        return false;
+        return null;
     }
 
     /**

@@ -32,7 +32,7 @@ import org.jivesoftware.openfire.component.ExternalComponentManager;
 import org.jivesoftware.openfire.container.BasicModule;
 import org.jivesoftware.openfire.forward.Forwarded;
 import org.jivesoftware.openfire.handler.PresenceUpdateHandler;
-import org.jivesoftware.openfire.server.OutgoingSessionPromise;
+import org.jivesoftware.openfire.server.LocalOutgoingServerProxy;
 import org.jivesoftware.openfire.session.*;
 import org.jivesoftware.util.ConcurrentHashSet;
 import org.jivesoftware.util.JiveGlobals;
@@ -117,8 +117,21 @@ public class RoutingTableImpl extends BasicModule implements RoutingTable, Clust
         localRoutingTable = new LocalRoutingTable();
     }
 
-    public void addServerRoute(JID route, LocalOutgoingServerSession destination) {
+    public void addServerRoute(JID route, RoutableChannelHandler destination) {
         String address = route.getDomain();
+        try {
+            ServerSession s = (ServerSession)destination;
+            ServerSession old = this.getServerRoute(route);
+            if (s == old) {
+                return; // Already done.
+            }
+            if (old == null) {
+                return; // This will get added later.
+            }
+            destination = new LocalOutgoingServerProxy(route, s); 
+        } catch(Exception e) {
+            // Just ignore this.
+        }
         localRoutingTable.addRoute(address, destination);
         Lock lock = CacheFactory.getLock(address, serversCache);
         try {
@@ -449,7 +462,7 @@ public class RoutingTableImpl extends BasicModule implements RoutingTable, Clust
 		            localRoutingTable.getRoute(jid.getDomain()).process(packet);
 		            routed = true;
 		        } catch (UnauthorizedException e) {
-		            Log.error("Unable to route packet " + packet.toXML(), e);
+		            Log.error("Unable to route packet {}", packet.toXML(), e);
 		        }
 		    }
 		    else {
@@ -460,10 +473,30 @@ public class RoutingTableImpl extends BasicModule implements RoutingTable, Clust
 		    }
 		}
 		else {
-		    // Return a promise of a remote session. This object will queue packets pending
-		    // to be sent to remote servers
-		    OutgoingSessionPromise.getInstance().process(packet);
-		    routed = true;
+		    boolean retry = false;
+		    // If we're here, it means we have no functional route. Sort it out.
+		    synchronized (this) { // Only create one route at a time.
+		        // Retry routing, in case someone else beat us to it before we got the lock.
+		        if (serversCache.get(jid.getDomain()) == null) {
+		            RoutableChannelHandler route = localRoutingTable.getRoute(jid.getDomain());
+		            if (route == null) {
+		                LocalOutgoingServerProxy proxy = new LocalOutgoingServerProxy(jid.getDomain());
+	                        try {
+	                            proxy.process(packet); // Put ours in first.
+	                            addServerRoute(new JID(jid.getDomain()), proxy); // At this point it may receive additional packets.
+	                        } catch (UnauthorizedException e) {
+	                            Log.error("Unable to route packet through new route: {}", packet.toXML(), e);
+	                        }
+		            }
+		            routed = true;
+		        } else {
+		            retry = true;
+		        }
+		    }
+		    if (retry) {
+		        // Curses! Need to recurse.
+		        routeToRemoteDomain(jid, packet, routed);
+		    }
 		}
 		return routed;
 	}
@@ -717,7 +750,7 @@ public class RoutingTableImpl extends BasicModule implements RoutingTable, Clust
 
     public OutgoingServerSession getServerRoute(JID jid) {
         // Check if this session is hosted by this cluster node
-        OutgoingServerSession session = (OutgoingServerSession) localRoutingTable.getRoute(jid.getDomain());
+        RoutableChannelHandler session = localRoutingTable.getRoute(jid.getDomain());
         if (session == null) {
             // The session is not in this JVM so assume remote
             RemoteSessionLocator locator = server.getRemoteSessionLocator();
@@ -728,8 +761,12 @@ public class RoutingTableImpl extends BasicModule implements RoutingTable, Clust
                     session = locator.getOutgoingServerSession(nodeID, jid);
                 }
             }
+        } else {
+            // Local ones are proxies.
+            LocalOutgoingServerProxy proxy = (LocalOutgoingServerProxy) session;
+            session = proxy.getSession();
         }
-        return session;
+        return (OutgoingServerSession)session;
     }
 
     public Collection<String> getServerHostnames() {
