@@ -118,17 +118,6 @@ public class NIOConnection implements Connection {
      */
     private volatile State state;
     
-    /**
-     * Lock used to ensure the integrity of the underlying IoSession (refer to
-     * https://issues.apache.org/jira/browse/DIRMINA-653 for details)
-     * <p>
-     * This lock can be removed once Openfire guarantees a stable delivery
-     * order, in which case {@link #deliver(Packet)} won't be called
-     * concurrently any more, which made this lock necessary in the first place.
-     * </p>
-     */
-    private final ReentrantLock ioSessionLock = new ReentrantLock(true);
-
     public NIOConnection(IoSession session, PacketDeliverer packetDeliverer) {
         this.ioSession = session;
         this.backupDeliverer = packetDeliverer;
@@ -326,12 +315,7 @@ public class NIOConnection implements Connection {
                 }
                 buffer.flip();
                 
-                ioSessionLock.lock();
-                try {
-                    ioSession.write(buffer);
-                } finally {
-                    ioSessionLock.unlock();
-                }
+                ioSession.write(buffer);
             }
             catch (Exception e) {
                 Log.debug("Error delivering packet:\n" + packet, e);
@@ -362,17 +346,11 @@ public class NIOConnection implements Connection {
                     buffer.put((byte) '\0');
                 }
                 buffer.flip();
-                ioSessionLock.lock();
-                try {
-                    // OF-464: handle dropped connections (no backupDeliverer in this case?)
-                    if (!ioSession.isConnected()) {
-                        throw new IOException("Connection reset/closed by peer");
-                    }
-                    ioSession.write(buffer);
+                // OF-464: handle dropped connections (no backupDeliverer in this case?)
+                if (!ioSession.isConnected()) {
+                    throw new IOException("Connection reset/closed by peer");
                 }
-                finally {
-                    ioSessionLock.unlock();
-                }
+                ioSession.write(buffer);
             }
             catch (Exception e) {
                 Log.debug("Error delivering raw text:\n" + text, e);
