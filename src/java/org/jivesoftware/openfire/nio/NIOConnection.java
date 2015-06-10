@@ -214,49 +214,54 @@ public class NIOConnection implements Connection {
 
     public void close( boolean peerIsKnownToBeDisconnected )
     {
-        boolean notifyClose = false;
+        boolean notifyClose = false;  // This thread should run the notifyClose.
+        boolean doClose = false;      // This thread should perform the actual close.
+        if ( state != State.RUNNING )
+        {
+            return;
+        }
+
         synchronized ( this ) {
-            try
+            // Check this again because it might have changed.
+            if ( state != State.RUNNING ) {
+                return;
+            } else {
+                state = State.CLOSING;
+                doClose = true;
+            }
+        }
+        
+        if ( doClose )
+        {
+            if ( !peerIsKnownToBeDisconnected )
             {
-                if ( state == State.CLOSED )
+                try
                 {
-                    return;
+                    deliverRawText( flashClient ? "</flash:stream>" : "</stream:stream>" );
                 }
-
-                // This prevents any action after the first invocation of close() on this connection.
-                if ( state != State.CLOSING )
+                catch ( Exception e )
                 {
-                    state = State.CLOSING;
-                    if ( !peerIsKnownToBeDisconnected )
-                    {
-                        try
-                        {
-                            deliverRawText( flashClient ? "</flash:stream>" : "</stream:stream>" );
-                        }
-                        catch ( Exception e )
-                        {
-                            // Ignore
-                        }
-                    }
-                }
-
-                // deliverRawText might already have forced the state from Closing to Closed. In that case, there's no need
-                // to invoke the CloseListeners again.
-                if ( state == State.CLOSING )
-                {
-                    notifyClose = true;
+                    // Ignore
                 }
             }
-            finally
+        }
+        
+        synchronized (this) {
+            // deliverRawText might already have forced the state from Closing to Closed. In that case, there's no need
+            // to invoke the CloseListeners again.
+            // The if statement can be thought of as saying:
+            //   if this thread started closing, and if the result was that the session is still in the process of closing.
+            if ( doClose && state == State.CLOSING )
             {
-                // Ensure that the state of this connection, its session and the MINA context are eventually closed.
-                state = State.CLOSED;
-                if ( session != null )
-                {
-                    session.setStatus( Session.STATUS_CLOSED );
-                }
-                ioSession.close( true );
+                notifyClose = true;
             }
+            // Ensure that the state of this connection, its session and the MINA context are eventually closed.
+            state = State.CLOSED;
+            if ( session != null )
+            {
+                session.setStatus( Session.STATUS_CLOSED );
+            }
+            ioSession.close( true );
         }
         if (notifyClose)
         {
