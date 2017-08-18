@@ -13,7 +13,7 @@ clean:
 dpkg:
 	cd build && ant installer.debian
 
-plugins:
+all-plugins:
 	cd build && ant plugins
 
 eclipse: .settings .classpath .project
