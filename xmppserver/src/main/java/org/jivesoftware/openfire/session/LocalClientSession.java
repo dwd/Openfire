@@ -81,6 +81,11 @@ public class LocalClientSession extends LocalSession implements ClientSession {
     protected AuthToken authToken;
 
     /**
+     * Has the authentication phase completed yet.
+     */
+    protected boolean authComplete;
+
+    /**
      * Flag indicating if this session has been initialized yet (upon first available transition).
      */
     private boolean initialized;
@@ -635,6 +640,7 @@ public class LocalClientSession extends LocalSession implements ClientSession {
     public LocalClientSession(String serverName, Connection connection, StreamID streamID, Locale language) {
         super(serverName, connection, streamID, language);
         // Set an unavailable initial presence
+        authComplete = false;
         presence = new Presence();
         presence.setType(Presence.Type.unavailable);
     }
@@ -649,7 +655,7 @@ public class LocalClientSession extends LocalSession implements ClientSession {
      */
     @Override
     public String getUsername() throws UserNotFoundException {
-        if (authToken == null) {
+        if (authToken == null || authComplete == false) {
             throw new UserNotFoundException();
         }
         return getAddress().getNode();
@@ -665,6 +671,10 @@ public class LocalClientSession extends LocalSession implements ClientSession {
      */
     public void setAuthToken(AuthToken auth) {
         authToken = auth;
+    }
+
+    public void authCompleted() {
+        authComplete = true;
     }
 
     /**
@@ -716,6 +726,15 @@ public class LocalClientSession extends LocalSession implements ClientSession {
      * @return the authentication token associated with this session (can be null).
      */
     public AuthToken getAuthToken() {
+        if (authComplete == false) return null;
+        return authToken;
+    }
+
+    /**
+     * Returns the authentication token even if this is not yet completed.
+     * @return
+     */
+    public AuthToken retreiveAuthToken() {
         return authToken;
     }
 
