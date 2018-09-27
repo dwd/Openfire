@@ -369,101 +369,65 @@ public class AdminConsole {
         generatedModel.accept( visitor );
     }
 
+    private enum OverrideType {
+        OVERRIDE_TAB,
+        OVERRIDE_SIDEBAR,
+        OVERRIDE_ENTRY
+    }
+
     private static void overrideTab(Element tab, Element overrideTab) {
-        // Override name, url, description.
-        if (overrideTab.attributeValue("name") != null) {
-            tab.addAttribute("name", overrideTab.attributeValue("name"));
-        }
-        if (overrideTab.attributeValue("url") != null) {
-            tab.addAttribute("url", overrideTab.attributeValue("url"));
-        }
-        if (overrideTab.attributeValue("description") != null) {
-            tab.addAttribute("description", overrideTab.attributeValue("description"));
-        }
-        if (overrideTab.attributeValue("plugin") != null) {
-            tab.addAttribute("plugin", overrideTab.attributeValue("plugin"));
-        }
-        if (overrideTab.attributeValue("order") != null) {
-            tab.addAttribute("order", overrideTab.attributeValue("order"));
-        }
-        // Override sidebar items.
-        for (Iterator i=overrideTab.elementIterator(); i.hasNext(); ) {
-            Element sidebar = (Element)i.next();
-            String id = sidebar.attributeValue("id");
-            Element existingSidebar = getElemnetByID(id);
-            // Simple case, there is no existing sidebar with the same id.
-            if (existingSidebar == null) {
-                tab.add(sidebar.createCopy());
-            }
-            // More complex case -- a sidebar with the same id already exists.
-            // In this case, we have to overrite only the difference between
-            // the two elements.
-            else {
-                overrideSidebar(existingSidebar, sidebar);
-            }
-        }
+        overrideElement(tab, overrideTab, OverrideType.OVERRIDE_TAB);
     }
 
     private static void overrideSidebar(Element sidebar, Element overrideSidebar) {
-        // Override name.
-        if (overrideSidebar.attributeValue("name") != null) {
-            sidebar.addAttribute("name", overrideSidebar.attributeValue("name"));
-        }
-        if (overrideSidebar.attributeValue("plugin") != null) {
-            sidebar.addAttribute("plugin", overrideSidebar.attributeValue("plugin"));
-        }
-        if (overrideSidebar.attributeValue("order") != null) {
-            sidebar.addAttribute("order", overrideSidebar.attributeValue("order"));
-        }
-        // Override entries.
-        for (Iterator i=overrideSidebar.elementIterator(); i.hasNext(); ) {
-            Element entry = (Element)i.next();
-            String id = entry.attributeValue("id");
-            Element existingEntry = getElemnetByID(id);
-            // Simple case, there is no existing sidebar with the same id.
-            if (existingEntry == null) {
-                sidebar.add(entry.createCopy());
-            }
-            // More complex case -- an entry with the same id already exists.
-            // In this case, we have to overrite only the difference between
-            // the two elements.
-            else {
-                overrideEntry(existingEntry, entry);
-            }
-        }
+        overrideElement(sidebar, overrideSidebar, OverrideType.OVERRIDE_SIDEBAR);
     }
 
     private static void overrideEntry(Element entry, Element overrideEntry) {
-        // Override name.
-        if (overrideEntry.attributeValue("name") != null) {
-            entry.addAttribute("name", overrideEntry.attributeValue("name"));
+        overrideElement(entry, overrideEntry, OverrideType.OVERRIDE_ENTRY);
+    }
+
+    private static void overrideElement(Element element, Element override, OverrideType what) {
+        // Override name, url, description.
+        if (override.attributeValue("name") != null) {
+            element.addAttribute("name", override.attributeValue("name"));
         }
-        if (overrideEntry.attributeValue("url") != null) {
-            entry.addAttribute("url", overrideEntry.attributeValue("url"));
+        if (override.attributeValue("url") != null) {
+            element.addAttribute("url", override.attributeValue("url"));
         }
-        if (overrideEntry.attributeValue("description") != null) {
-            entry.addAttribute("description", overrideEntry.attributeValue("description"));
+        if (override.attributeValue("description") != null) {
+            element.addAttribute("description", override.attributeValue("description"));
         }
-        if (overrideEntry.attributeValue("plugin") != null) {
-            entry.addAttribute("plugin", overrideEntry.attributeValue("plugin"));
+        if (override.attributeValue("plugin") != null) {
+            element.addAttribute("plugin", override.attributeValue("plugin"));
         }
-        if (overrideEntry.attributeValue("order") != null) {
-            entry.addAttribute("order", overrideEntry.attributeValue("order"));
+        if (override.attributeValue("order") != null) {
+            element.addAttribute("order", override.attributeValue("order"));
         }
-        // Override any sidebars contained in the entry.
-        for (Iterator i=overrideEntry.elementIterator(); i.hasNext(); ) {
-            Element sidebar = (Element)i.next();
-            String id = sidebar.attributeValue("id");
-            Element existingSidebar = getElemnetByID(id);
-            // Simple case, there is no existing sidebar with the same id.
-            if (existingSidebar == null) {
-                entry.add(sidebar.createCopy());
+        // Override sidebar items.
+        for (Iterator i=override.elementIterator(); i.hasNext(); ) {
+            Element container = (Element)i.next();
+            String id = container.attributeValue("id");
+            Element existing = getElemnetByID(id);
+            // Simple case, there is no existing container with the same id.
+            if (existing == null) {
+                element.add(container.createCopy());
             }
-            // More complex case -- a sidebar with the same id already exists.
+            // More complex case -- a container with the same id already exists.
             // In this case, we have to overrite only the difference between
             // the two elements.
             else {
-                overrideSidebar(existingSidebar, sidebar);
+                switch (what) {
+                    case OVERRIDE_TAB:
+                        overrideSidebar(existing, container);
+                        return;
+                    case OVERRIDE_SIDEBAR:
+                        overrideEntry(existing, container);
+                        return;
+                    case OVERRIDE_ENTRY:
+                        overrideSidebar(existing, container);
+                        return;
+                }
             }
         }
     }

@@ -102,14 +102,7 @@ public class PubSubEngine {
             }
             action = childElement.element("options");
             if (action != null) {
-                if (IQ.Type.get == iq.getType()) {
-                    // Subscriber requests subscription options form
-                    getSubscriptionConfiguration(service, iq, childElement, action);
-                }
-                else {
-                    // Subscriber submits completed options form
-                    configureSubscription(service, iq, action);
-                }
+                configureSubscription(service, iq, childElement, action);
                 return new ImmediateFuture<>();
             }
             action = childElement.element("create");
@@ -855,89 +848,7 @@ public class PubSubEngine {
         router.route(IQ.createResultIQ(iq));
     }
 
-    private void getSubscriptionConfiguration(PubSubService service, IQ iq,
-                                              Element childElement, Element optionsElement) {
-        String nodeID = optionsElement.attributeValue("node");
-        String subID = optionsElement.attributeValue("subid");
-        Node node;
-        if (nodeID == null) {
-            if (service.isCollectionNodesSupported()) {
-                // Entity requests subscription options of root collection node
-                node = service.getRootCollectionNode();
-            }
-            else {
-                // Service does not have a root collection node so return a nodeid-required error
-                Element pubsubError = DocumentHelper.createElement(QName.get(
-                        "nodeid-required", "http://jabber.org/protocol/pubsub#errors"));
-                sendErrorPacket(iq, PacketError.Condition.bad_request, pubsubError);
-                return;
-            }
-        }
-        else {
-            // Look for the specified node
-            node = service.getNode(nodeID);
-            if (node == null) {
-                // Node does not exist. Return item-not-found error
-                sendErrorPacket(iq, PacketError.Condition.item_not_found, null);
-                return;
-            }
-        }
-        NodeSubscription subscription;
-        if (node.isMultipleSubscriptionsEnabled()) {
-            if (subID == null) {
-                // No subid was specified and the node supports multiple subscriptions
-                Element pubsubError = DocumentHelper.createElement(
-                        QName.get("subid-required", "http://jabber.org/protocol/pubsub#errors"));
-                sendErrorPacket(iq, PacketError.Condition.bad_request, pubsubError);
-                return;
-            }
-            else {
-                // Check if the specified subID belongs to an existing node subscription
-                subscription = node.getSubscription(subID);
-                if (subscription == null) {
-                    Element pubsubError = DocumentHelper.createElement(
-                            QName.get("invalid-subid", "http://jabber.org/protocol/pubsub#errors"));
-                    sendErrorPacket(iq, PacketError.Condition.not_acceptable, pubsubError);
-                    return;
-                }
-            }
-        }
-        else {
-            // Check if the specified JID has a subscription with the node
-            String jidAttribute = optionsElement.attributeValue("jid");
-            if (jidAttribute == null) {
-                // No JID was specified so return an error indicating that jid is required
-                Element pubsubError = DocumentHelper.createElement(
-                        QName.get("jid-required", "http://jabber.org/protocol/pubsub#errors"));
-                sendErrorPacket(iq, PacketError.Condition.bad_request, pubsubError);
-                return;
-            }
-            JID subscriberJID = new JID(jidAttribute);
-            subscription = node.getSubscription(subscriberJID);
-            if (subscription == null) {
-                Element pubsubError = DocumentHelper.createElement(
-                        QName.get("not-subscribed", "http://jabber.org/protocol/pubsub#errors"));
-                sendErrorPacket(iq, PacketError.Condition.unexpected_request, pubsubError);
-                return;
-            }
-        }
-
-        // A subscription was found so check if the user is allowed to get the subscription options
-        if (!subscription.canModify(iq.getFrom())) {
-            // Requestor is prohibited from getting the subscription options
-            sendErrorPacket(iq, PacketError.Condition.forbidden, null);
-            return;
-        }
-
-        // Return data form containing subscription configuration to the subscriber
-        IQ reply = IQ.createResultIQ(iq);
-        Element replyChildElement = childElement.createCopy();
-        reply.setChildElement(replyChildElement);
-        replyChildElement.element("options").add(subscription.getConfigurationForm().getElement());
-        router.route(reply);
-    }
-
-    private void configureSubscription(PubSubService service, IQ iq, Element optionsElement) {
+    private void configureSubscription(PubSubService service, IQ iq, Element childElement, Element optionsElement) {
         String nodeID = optionsElement.attributeValue("node");
         String subID = optionsElement.attributeValue("subid");
         Node node;
@@ -1011,14 +922,22 @@ public class PubSubEngine {
             return;
         }
 
-        Element formElement = optionsElement.element(QName.get("x", "jabber:x:data"));
-        if (formElement != null) {
-            // Change the subscription configuration based on the completed form
-            subscription.configure(iq, new DataForm(formElement));
-        }
-        else {
-            // No data form was included so return bad request error
-            sendErrorPacket(iq, PacketError.Condition.bad_request, null);
+        if (IQ.Type.get == iq.getType()) {
+            // Return data form containing subscription configuration to the subscriber
+            IQ reply = IQ.createResultIQ(iq);
+            Element replyChildElement = childElement.createCopy();
+            reply.setChildElement(replyChildElement);
+            replyChildElement.element("options").add(subscription.getConfigurationForm().getElement());
+            router.route(reply);
+        } else {
+            Element formElement = optionsElement.element(QName.get("x", "jabber:x:data"));
+            if (formElement != null) {
+                // Change the subscription configuration based on the completed form
+                subscription.configure(iq, new DataForm(formElement));
+            } else {
+                // No data form was included so return bad request error
+                sendErrorPacket(iq, PacketError.Condition.bad_request, null);
+            }
         }
     }
 
