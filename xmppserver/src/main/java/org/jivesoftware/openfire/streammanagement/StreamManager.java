@@ -264,6 +264,17 @@ public class StreamManager {
     public Element enableAndBuildElement( String namespace, boolean resume ) throws StreamManagementException
     {
         boolean offerResume = allowResume();
+        // XEP-0198 MUST NOT be negotiated over QUIC. Reject any client that nonetheless
+        // attempts to <enable/> stream management over a QUIC connection.
+        if (session.getConnection() != null
+            && session.getConnection().getConfiguration() != null
+            && session.getConnection().getConfiguration().getType() == org.jivesoftware.openfire.spi.ConnectionType.QUIC_C2S) {
+            this.namespace = namespace;
+            Log.debug("Rejecting <enable/> for stream management on QUIC connection {} (XEP-0467 §3.3 prohibits XEP-0198 over QUIC).", session);
+            sendUnexpectedError();
+            return;
+        }
+        // Ensure that resource binding has occurred.
         if (!session.isAuthenticated()) {
             throw new StreamManagementException(PacketError.Condition.unexpected_request,
                 "Stream management cannot be enabled before the session is authenticated.");
