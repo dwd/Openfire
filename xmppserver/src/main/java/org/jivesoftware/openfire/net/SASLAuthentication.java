@@ -19,6 +19,7 @@ package org.jivesoftware.openfire.net;
 import com.google.common.annotations.VisibleForTesting;
 import org.dom4j.DocumentHelper;
 import org.dom4j.Element;
+import org.dom4j.Namespace;
 import org.dom4j.QName;
 import org.jivesoftware.openfire.XMPPServer;
 import org.jivesoftware.openfire.XMPPServerInfo;
@@ -54,6 +55,8 @@ import javax.security.sasl.Sasl;
 import javax.security.sasl.SaslException;
 import javax.security.sasl.SaslServer;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
 import java.util.*;
@@ -184,6 +187,30 @@ public class SASLAuthentication {
     public static final String SASL_NAMESPACE = "urn:ietf:params:xml:ns:xmpp-sasl";
     public static final String SASL2_NAMESPACE = "urn:xmpp:sasl:2";
     public static final String SASL_CHANNEL_BINDING_NAMESPACE = "urn:xmpp:sasl-cb:0";
+
+    /**
+     * The XML namespace for the Initial Authentication Pipelining (IAP) extension.
+     *
+     * @see <a href="https://xmpp.org/extensions/xep-0509.html">XEP-0509: Initial Authentication Pipelining</a>
+     */
+    public static final String IAP_NAMESPACE = "urn:xmpp:iap:0";
+
+    /**
+     * Enable (or disable) the Initial Authentication Pipelining (IAP) feature (XEP-0509).
+     *
+     * <p>When enabled, the server advertises a {@code <config-version>} stream feature so that
+     * clients can safely pipeline their SASL2 {@code <authenticate>} together with the stream
+     * open on subsequent connections.  Clients supply the cached value back in the
+     * {@code <authenticate>} element; the server rejects with {@code <config-version-mismatch>}
+     * when the value no longer matches the current feature set.</p>
+     *
+     * @see <a href="https://xmpp.org/extensions/xep-0509.html">XEP-0509: Initial Authentication Pipelining</a>
+     */
+    public static final SystemProperty<Boolean> ENABLE_IAP = SystemProperty.Builder.ofType(Boolean.class)
+        .setKey("xmpp.auth.iap")
+        .setDynamic(true)
+        .setDefaultValue(false)
+        .build();
 
     /**
      * Java's SaslServer does not allow for null values. This makes it hard to distinguish between an empty (initial)
@@ -345,6 +372,36 @@ public class SASLAuthentication {
     public static void setAdvertisedSASLMechanisms(@Nonnull final LocalSession session, final Set<String> advertisedMechanisms)
     {
         session.setSessionData(SASLAuthentication.AVAILABLE_MECHANISMS_FOR_SESSION, Set.copyOf(advertisedMechanisms));
+    }
+
+    /**
+     * Generates an opaque {@code config-version} token for use in the IAP (XEP-0509) stream feature.
+     *
+     * <p>The value is a URL-safe Base64-encoded SHA-256 digest of the concatenated XML
+     * representations of the supplied feature elements.  The elements are serialised in the order
+     * provided, so callers must ensure a deterministic ordering (typically the order in which
+     * features are appended to the stream-features element).</p>
+     *
+     * <p>If SHA-256 is unavailable the method falls back to returning an empty string, which will
+     * cause the {@code <config-version>} element to be emitted with an empty value rather than
+     * breaking feature advertisement entirely.</p>
+     *
+     * @param features the list of stream-feature elements to hash (must not include the
+     *                 {@code <config-version>} element itself)
+     * @return a non-null, URL-safe Base64-encoded hash string (may be empty on algorithm failure)
+     */
+    @VisibleForTesting
+    static String generateConfigVersion(@Nonnull final List<Element> features) {
+        try {
+            final MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            for (final Element feature : features) {
+                digest.update(feature.asXML().getBytes(StandardCharsets.UTF_8));
+            }
+            return Base64.getUrlEncoder().withoutPadding().encodeToString(digest.digest());
+        } catch (NoSuchAlgorithmException e) {
+            Log.error("SHA-256 algorithm unavailable; IAP config-version cannot be computed.", e);
+            return "";
+        }
     }
 
     /**

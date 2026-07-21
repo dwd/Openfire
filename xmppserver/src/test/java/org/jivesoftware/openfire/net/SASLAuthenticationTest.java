@@ -1600,6 +1600,285 @@ public class SASLAuthenticationTest
         assertNull(session.getSessionData("SaslServer"));
     }
 
+    // -------------------------------------------------------------------------
+    // generateConfigVersion
+    // -------------------------------------------------------------------------
+
+    /**
+     * Verifies that generateConfigVersion returns a non-null, non-empty string for a typical
+     * list of feature elements.
+     */
+    @Test
+    public void generateConfigVersionShouldReturnNonEmptyStringForNonEmptyFeatureList()
+    {
+        final Element el1 = DocumentHelper.createElement(new QName("mechanisms", Namespace.get("", SASLAuthentication.SASL_NAMESPACE)));
+        el1.addElement("mechanism").setText("PLAIN");
+        final List<Element> features = Collections.singletonList(el1);
+
+        final String version = SASLAuthentication.generateConfigVersion(features);
+
+        assertNotNull(version, "Expected generateConfigVersion to return a non-null value.");
+        assertFalse(version.isEmpty(), "Expected generateConfigVersion to return a non-empty value.");
+    }
+
+    /**
+     * Verifies that generateConfigVersion returns the same value for the same input.
+     */
+    @Test
+    public void generateConfigVersionShouldBeDeterministicForTheSameInput()
+    {
+        final Element el = DocumentHelper.createElement(new QName("mechanisms", Namespace.get("", SASLAuthentication.SASL_NAMESPACE)));
+        el.addElement("mechanism").setText("PLAIN");
+        final List<Element> features = Collections.singletonList(el);
+
+        final String version1 = SASLAuthentication.generateConfigVersion(features);
+        final String version2 = SASLAuthentication.generateConfigVersion(features);
+
+        assertEquals(version1, version2, "Expected generateConfigVersion to be deterministic.");
+    }
+
+    /**
+     * Verifies that generateConfigVersion returns different values for different feature sets.
+     */
+    @Test
+    public void generateConfigVersionShouldDifferForDifferentFeatureSets()
+    {
+        final Element el1 = DocumentHelper.createElement(new QName("mechanisms", Namespace.get("", SASLAuthentication.SASL_NAMESPACE)));
+        el1.addElement("mechanism").setText("PLAIN");
+
+        final Element el2 = DocumentHelper.createElement(new QName("mechanisms", Namespace.get("", SASLAuthentication.SASL_NAMESPACE)));
+        el2.addElement("mechanism").setText("EXTERNAL");
+
+        final String version1 = SASLAuthentication.generateConfigVersion(Collections.singletonList(el1));
+        final String version2 = SASLAuthentication.generateConfigVersion(Collections.singletonList(el2));
+
+        assertFalse(version1.equals(version2), "Expected generateConfigVersion to produce different values for different feature sets.");
+    }
+
+    /**
+     * Verifies that generateConfigVersion returns a non-empty string even for an empty feature list.
+     */
+    @Test
+    public void generateConfigVersionShouldReturnNonEmptyStringForEmptyFeatureList()
+    {
+        final String version = SASLAuthentication.generateConfigVersion(Collections.emptyList());
+
+        assertNotNull(version, "Expected generateConfigVersion to return a non-null value for an empty list.");
+        assertFalse(version.isEmpty(), "Expected generateConfigVersion to return a non-empty value for an empty list.");
+    }
+
+    // -------------------------------------------------------------------------
+    // getSASLMechanisms — IAP feature advertisement
+    // -------------------------------------------------------------------------
+
+    /**
+     * Verifies that getSASLMechanisms includes a <config-version> IAP element when IAP is enabled
+     * for an unauthenticated client session.
+     */
+    @Test
+    public void getSASLMechanismsShouldIncludeIapConfigVersionWhenIapIsEnabled()
+    {
+        JiveGlobals.setProperty("xmpp.auth.iap", "true");
+        SASLAuthentication.ENABLE_SASL2.setValue(false); // keep it simple: SASL1 only
+        SASLAuthentication.setEnabledMechanisms(Collections.singletonList("PLAIN"));
+
+        final Connection connection = mock(Connection.class);
+        when(connection.isEncrypted()).thenReturn(false);
+        final StreamID streamID = new BasicStreamIDFactory().createStreamID();
+        final LocalClientSession session = new LocalClientSession(Fixtures.XMPP_DOMAIN, connection, streamID, Locale.ENGLISH);
+
+        final List<Element> features = SASLAuthentication.getSASLMechanisms(session);
+
+        final boolean hasConfigVersion = features.stream()
+            .anyMatch(e -> "config-version".equals(e.getName())
+                && SASLAuthentication.IAP_NAMESPACE.equals(e.getNamespaceURI()));
+        assertTrue(hasConfigVersion, "Expected getSASLMechanisms to include <config-version> element when IAP is enabled.");
+    }
+
+    /**
+     * Verifies that getSASLMechanisms does NOT include a <config-version> IAP element when IAP is disabled.
+     */
+    @Test
+    public void getSASLMechanismsShouldNotIncludeIapConfigVersionWhenIapIsDisabled()
+    {
+        JiveGlobals.setProperty("xmpp.auth.iap", "false");
+        SASLAuthentication.setEnabledMechanisms(Collections.singletonList("PLAIN"));
+
+        final Connection connection = mock(Connection.class);
+        when(connection.isEncrypted()).thenReturn(false);
+        final StreamID streamID = new BasicStreamIDFactory().createStreamID();
+        final LocalClientSession session = new LocalClientSession(Fixtures.XMPP_DOMAIN, connection, streamID, Locale.ENGLISH);
+
+        final List<Element> features = SASLAuthentication.getSASLMechanisms(session);
+
+        final boolean hasConfigVersion = features.stream()
+            .anyMatch(e -> "config-version".equals(e.getName())
+                && SASLAuthentication.IAP_NAMESPACE.equals(e.getNamespaceURI()));
+        assertFalse(hasConfigVersion, "Expected getSASLMechanisms NOT to include <config-version> element when IAP is disabled.");
+    }
+
+    /**
+     * Verifies that generateConfigVersion produces a different value when the feature set changes,
+     * confirming that IAP config-version tracks configuration changes.
+     */
+    @Test
+    public void iapConfigVersionShouldChangeWhenFeatureSetChanges()
+    {
+        // Build two feature sets with different mechanism lists and compare their hashes.
+        final Element mechanisms1 = DocumentHelper.createElement(new QName("mechanisms", Namespace.get("", SASLAuthentication.SASL_NAMESPACE)));
+        mechanisms1.addElement("mechanism").setText("PLAIN");
+
+        final Element mechanisms2 = DocumentHelper.createElement(new QName("mechanisms", Namespace.get("", SASLAuthentication.SASL_NAMESPACE)));
+        mechanisms2.addElement("mechanism").setText("PLAIN");
+        mechanisms2.addElement("mechanism").setText("DIGEST-MD5");
+
+        final String versionSmall = SASLAuthentication.generateConfigVersion(Collections.singletonList(mechanisms1));
+        final String versionLarge = SASLAuthentication.generateConfigVersion(Collections.singletonList(mechanisms2));
+
+        assertFalse(versionSmall.isEmpty(), "Expected a non-empty config-version for first feature set.");
+        assertFalse(versionSmall.equals(versionLarge),
+            "Expected config-version to change when the advertised feature set changes.");
+    }
+
+    /**
+     * Verifies that the <config-version> value is stable: two calls for equivalent sessions return
+     * the same value.
+     */
+    @Test
+    public void iapConfigVersionShouldBeStableForEquivalentSessions()
+    {
+        JiveGlobals.setProperty("xmpp.auth.iap", "true");
+        SASLAuthentication.setEnabledMechanisms(Collections.singletonList("PLAIN"));
+
+        final Connection connection = mock(Connection.class);
+        when(connection.isEncrypted()).thenReturn(false);
+        final StreamID streamID1 = new BasicStreamIDFactory().createStreamID();
+        final StreamID streamID2 = new BasicStreamIDFactory().createStreamID();
+        final LocalClientSession session1 = new LocalClientSession(Fixtures.XMPP_DOMAIN, connection, streamID1, Locale.ENGLISH);
+        final LocalClientSession session2 = new LocalClientSession(Fixtures.XMPP_DOMAIN, connection, streamID2, Locale.ENGLISH);
+
+        final List<Element> features1 = SASLAuthentication.getSASLMechanisms(session1);
+        final List<Element> features2 = SASLAuthentication.getSASLMechanisms(session2);
+
+        final String cv1 = features1.stream()
+            .filter(e -> "config-version".equals(e.getName()))
+            .findFirst().map(e -> e.attributeValue("value")).orElse("");
+        final String cv2 = features2.stream()
+            .filter(e -> "config-version".equals(e.getName()))
+            .findFirst().map(e -> e.attributeValue("value")).orElse("");
+
+        assertEquals(cv1, cv2, "Expected the same config-version for equivalent sessions.");
+    }
+
+    // -------------------------------------------------------------------------
+    // handle() — IAP config-version validation
+    // -------------------------------------------------------------------------
+
+    /**
+     * Verifies that handle() rejects a SASL2 authenticate with a mismatched config-version when
+     * IAP is enabled, responding with a failure containing <config-version-mismatch>.
+     */
+    @Test
+    public void handleShouldRejectMismatchedConfigVersionWhenIapIsEnabled()
+    {
+        JiveGlobals.setProperty("xmpp.auth.iap", "true");
+        SASLAuthentication.ENABLE_SASL2.setValue(true);
+        SASLAuthentication.SASL2_REQUIRE_TLS.setValue(false);
+        SASLAuthentication.setEnabledMechanisms(Collections.singletonList("PLAIN"));
+
+        final Connection connection = mock(Connection.class);
+        when(connection.isEncrypted()).thenReturn(false);
+        final StreamID streamID = new BasicStreamIDFactory().createStreamID();
+        final LocalClientSession session = new LocalClientSession(Fixtures.XMPP_DOMAIN, connection, streamID, Locale.ENGLISH);
+
+        // Build <authenticate> with a wrong config-version.
+        final Element authenticate = sasl2AuthenticateElement("PLAIN");
+        authenticate.addElement(new QName("config-version", Namespace.get("", SASLAuthentication.IAP_NAMESPACE)))
+            .addAttribute("value", "intentionally-wrong-value");
+
+        final SASLAuthentication.Status status = SASLAuthentication.handle(session, authenticate, true);
+
+        assertEquals(SASLAuthentication.Status.failed, status,
+            "Expected SASL negotiation to fail when config-version is mismatched.");
+        final ArgumentCaptor<String> response = ArgumentCaptor.forClass(String.class);
+        verify(connection).deliverRawText(response.capture());
+        final String xml = response.getValue();
+        assertTrue(xml.contains("config-version-mismatch"),
+            "Expected <config-version-mismatch> in the failure response. Got: " + xml);
+        assertTrue(xml.contains("aborted"),
+            "Expected <aborted> in the failure response. Got: " + xml);
+    }
+
+    /**
+     * Verifies that handle() accepts a SASL2 authenticate with a matching config-version when
+     * IAP is enabled (authentication proceeds normally, not rejected for IAP reasons).
+     */
+    @Test
+    public void handleShouldAcceptMatchingConfigVersionWhenIapIsEnabled()
+    {
+        JiveGlobals.setProperty("xmpp.auth.iap", "true");
+        SASLAuthentication.ENABLE_SASL2.setValue(true);
+        SASLAuthentication.SASL2_REQUIRE_TLS.setValue(false);
+        SASLAuthentication.setEnabledMechanisms(Collections.singletonList("PLAIN"));
+
+        final Connection connection = mock(Connection.class);
+        when(connection.isEncrypted()).thenReturn(false);
+        final StreamID streamID = new BasicStreamIDFactory().createStreamID();
+        final LocalClientSession session = new LocalClientSession(Fixtures.XMPP_DOMAIN, connection, streamID, Locale.ENGLISH);
+
+        // Compute the correct config-version for this session.
+        final List<Element> features = SASLAuthentication.getSASLMechanisms(session);
+        final String correctVersion = features.stream()
+            .filter(e -> "config-version".equals(e.getName()))
+            .findFirst().map(e -> e.attributeValue("value")).orElseThrow();
+
+        // Build <authenticate> with the correct config-version.
+        final Element authenticate = sasl2AuthenticateElement("PLAIN");
+        authenticate.addElement(new QName("config-version", Namespace.get("", SASLAuthentication.IAP_NAMESPACE)))
+            .addAttribute("value", correctVersion);
+
+        final SASLAuthentication.Status status = SASLAuthentication.handle(session, authenticate, true);
+
+        // Should NOT fail due to config-version mismatch; may fail for other reasons (no PLAIN response, etc.).
+        final ArgumentCaptor<String> response = ArgumentCaptor.forClass(String.class);
+        verify(connection).deliverRawText(response.capture());
+        final String xml = response.getValue();
+        assertFalse(xml.contains("config-version-mismatch"),
+            "Expected NO <config-version-mismatch> when the config-version matches. Got: " + xml);
+    }
+
+    /**
+     * Verifies that handle() ignores a client-supplied <config-version> when IAP is disabled.
+     */
+    @Test
+    public void handleShouldIgnoreConfigVersionWhenIapIsDisabled()
+    {
+        JiveGlobals.setProperty("xmpp.auth.iap", "false");
+        SASLAuthentication.ENABLE_SASL2.setValue(true);
+        SASLAuthentication.SASL2_REQUIRE_TLS.setValue(false);
+        SASLAuthentication.setEnabledMechanisms(Collections.singletonList("PLAIN"));
+
+        final Connection connection = mock(Connection.class);
+        when(connection.isEncrypted()).thenReturn(false);
+        final StreamID streamID = new BasicStreamIDFactory().createStreamID();
+        final LocalClientSession session = new LocalClientSession(Fixtures.XMPP_DOMAIN, connection, streamID, Locale.ENGLISH);
+
+        // Build <authenticate> with a wrong config-version (would fail if IAP were enabled).
+        final Element authenticate = sasl2AuthenticateElement("PLAIN");
+        authenticate.addElement(new QName("config-version", Namespace.get("", SASLAuthentication.IAP_NAMESPACE)))
+            .addAttribute("value", "wrong-value-that-would-fail-if-iap-enabled");
+
+        final SASLAuthentication.Status status = SASLAuthentication.handle(session, authenticate, true);
+
+        // Authentication may still fail for other reasons (no PLAIN initial response), but must
+        // NOT contain a config-version-mismatch failure element.
+        final ArgumentCaptor<String> response = ArgumentCaptor.forClass(String.class);
+        verify(connection).deliverRawText(response.capture());
+        final String xml = response.getValue();
+        assertFalse(xml.contains("config-version-mismatch"),
+            "Expected NO <config-version-mismatch> when IAP is disabled. Got: " + xml);
+    }
+
     private static Element authElement(final String mechanism)
     {
         final Element auth = DocumentHelper.createElement(new QName("auth", Namespace.get("", SASL_NAMESPACE)));
