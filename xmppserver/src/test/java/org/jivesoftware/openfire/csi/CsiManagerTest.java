@@ -995,6 +995,112 @@ public class CsiManagerTest
     }
 
     /**
+     * Verifies that a second delayable presence stanza from the same full JID squashes (replaces) the first one
+     * already held in the delay queue, keeping the queue size at 1.
+     */
+    @Test
+    public void testQueueOrPushSquashesEarlierPresenceFromSameFullJid() throws Exception
+    {
+        // Setup test fixture
+        csiManager.deactivate();
+        final Packet presence1 = parse("""
+            <presence from="contact@example.com/mobile" to="user@example.com"/>""");
+        final Packet presence2 = parse("""
+            <presence from="contact@example.com/mobile" to="user@example.com">
+               <show>away</show>
+            </presence>""");
+
+        // Queue the first presence; it should be held because the client is inactive.
+        assertTrue(csiManager.queueOrPush(presence1).isEmpty(), "First presence should be queued");
+        assertEquals(1, csiManager.getDelayQueueSize(), "Queue should hold exactly 1 presence after first enqueue");
+
+        // Execute system under test: a second presence from the same full JID squashes the first.
+        assertTrue(csiManager.queueOrPush(presence2).isEmpty(), "Second presence should be queued (not flushed)");
+
+        // Verify result
+        assertEquals(1, csiManager.getDelayQueueSize(),
+            "Queue should still hold exactly 1 presence after squashing the earlier one from the same full JID");
+    }
+
+    /**
+     * Verifies that the stanza retained in the queue after squashing is the newer (second) presence, not the older one.
+     */
+    @Test
+    public void testQueueOrPushSquashRetainsNewerPresence() throws Exception
+    {
+        // Setup test fixture
+        csiManager.deactivate();
+        final Packet presence1 = parse("""
+            <presence from="contact@example.com/mobile" to="user@example.com"/>""");
+        final Packet presence2 = parse("""
+            <presence from="contact@example.com/mobile" to="user@example.com">
+               <show>away</show>
+            </presence>""");
+
+        csiManager.queueOrPush(presence1);
+        csiManager.queueOrPush(presence2);
+
+        // Execute system under test: force a flush via a non-delayable packet.
+        final Packet iq = createIQ();
+        final List<Packet> flushed = csiManager.queueOrPush(iq);
+
+        // Verify result
+        assertTrue(flushed.contains(presence2), "Flushed packets should contain the newer presence");
+        assertFalse(flushed.contains(presence1), "Flushed packets should NOT contain the squashed (older) presence");
+        assertTrue(flushed.contains(iq), "Flushed packets should contain the triggering IQ");
+    }
+
+    /**
+     * Verifies that delayable presence stanzas from different full JIDs are NOT squashed, so both are kept in the queue.
+     */
+    @Test
+    public void testQueueOrPushDoesNotSquashPresencesFromDifferentFullJids() throws Exception
+    {
+        // Setup test fixture
+        csiManager.deactivate();
+        final Packet presenceA = parse("""
+            <presence from="contact@example.com/mobile" to="user@example.com"/>""");
+        final Packet presenceB = parse("""
+            <presence from="contact@example.com/desktop" to="user@example.com"/>""");
+
+        // Execute system under test
+        assertTrue(csiManager.queueOrPush(presenceA).isEmpty(), "First presence should be queued");
+        assertTrue(csiManager.queueOrPush(presenceB).isEmpty(), "Second presence from different resource should also be queued");
+
+        // Verify result
+        assertEquals(2, csiManager.getDelayQueueSize(),
+            "Presences from different full JIDs must both remain in the queue (no squashing)");
+    }
+
+    /**
+     * Verifies that a non-delayable presence (e.g. a subscription stanza) is never squashed out of the queue.
+     */
+    @Test
+    public void testQueueOrPushDoesNotSquashNonDelayablePresence() throws Exception
+    {
+        // Setup test fixture: queue a delayable presence, then send a non-delayable presence from the same JID.
+        // The non-delayable one forces a flush, so we use active mode to keep it simple — the important assertion
+        // is that the earlier delayable presence is NOT discarded by the arrival of the non-delayable one.
+        csiManager.deactivate();
+        final Packet delayablePresence = parse("""
+            <presence from="contact@example.com/mobile" to="user@example.com"/>""");
+        final Packet subscribePresence = parse("""
+            <presence type="subscribe" from="contact@example.com/mobile" to="user@example.com"/>""");
+
+        // Queue the delayable presence.
+        assertTrue(csiManager.queueOrPush(delayablePresence).isEmpty(), "Delayable presence should be queued");
+        assertEquals(1, csiManager.getDelayQueueSize(), "Queue should hold 1 stanza");
+
+        // The subscribe presence is non-delayable, so it triggers a flush including the queued delayable presence.
+        final List<Packet> flushed = csiManager.queueOrPush(subscribePresence);
+
+        // Verify result: both stanzas must appear — the delayable one was NOT squashed by the subscribe.
+        assertEquals(2, flushed.size(), "Flush should return both the delayable presence and the subscribe");
+        assertTrue(flushed.contains(delayablePresence), "Flushed result must contain the original delayable presence");
+        assertTrue(flushed.contains(subscribePresence), "Flushed result must contain the subscribe presence");
+    }
+
+    /**
      * Verifies CSI nonza recognition for an 'active' element.
      */
     @Test
