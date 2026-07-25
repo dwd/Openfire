@@ -231,6 +231,15 @@ public class CsiManager
      */
     public synchronized List<Packet> queueOrPush(@Nonnull final Packet packet)
     {
+        // If the incoming stanza is a delayable presence, remove any earlier queued delayable presence from the
+        // same full JID so that only the most-recent (authoritative) state is kept. This avoids accumulating
+        // redundant presence updates for the same resource while the client is inactive.
+        if (packet instanceof Presence && canDelay(packet) && packet.getFrom() != null) {
+            queue.removeIf(queued -> queued instanceof Presence
+                && canDelay(queued)
+                && packet.getFrom().equals(queued.getFrom()));
+        }
+
         queue.add(packet);
 
         final boolean mustPush = !flushingOnActivate // Never flush while activation is in progress, as this can cause out-of-order delivery.
