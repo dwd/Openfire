@@ -18,6 +18,9 @@ package org.jivesoftware.openfire.csi;
 import org.dom4j.DocumentException;
 import org.dom4j.Element;
 import org.dom4j.io.XMPPPacketReader;
+import org.jivesoftware.Fixtures;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -34,6 +37,7 @@ import org.jivesoftware.openfire.session.LocalClientSession;
 
 import java.io.IOException;
 import java.io.StringReader;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -61,11 +65,26 @@ public class CsiManagerTest
 
     private CsiManager csiManager;
 
+    @BeforeAll
+    public static void setUpClass() throws Exception
+    {
+        Fixtures.reconfigureOpenfireHome();
+        Fixtures.disableDatabasePersistence();
+    }
+
     @BeforeEach
     public void setUp() throws Exception
     {
+        Fixtures.clearExistingProperties();
         csiManager = new CsiManager(mockSession);
         doAnswer(invocation -> null).when(mockSession).pushPackets(any());
+    }
+
+    @AfterEach
+    public void tearDown()
+    {
+        // Clear any properties set during the test so they do not affect subsequent tests.
+        Fixtures.clearExistingProperties();
     }
 
     /**
@@ -841,6 +860,138 @@ public class CsiManagerTest
 
         // Verify result
         assertTrue(result, "Normal messages without body should be delayable");
+    }
+
+    /**
+     * Verifies that a group chat message stanza without a body, subject, or any other exemptions <em>is</em> identified
+     * as a stanza that can be delayed/queued in context of CSI.
+     */
+    @Test
+    public void testCanDelayGroupChatMessageWithoutBodyOrSubjectReturnsTrue() throws Exception
+    {
+        // Setup test fixture - a groupchat message without body or subject carries no user-visible content and can wait
+        final Packet groupchatNoBodyNoSubject = parse("""
+            <message type="groupchat" to="user@example.com">
+               <composing xmlns="http://jabber.org/protocol/chatstates"/>
+            </message>""");
+
+        // Execute system under test
+        final boolean result = CsiManager.canDelay(groupchatNoBodyNoSubject);
+
+        // Verify result
+        assertTrue(result, "Groupchat message without body or subject should be delayable");
+    }
+
+    /**
+     * Verifies that a presence stanza that contains a MUC user element but does <em>not</em> carry status code 110
+     * (i.e. is not a self-presence) <em>is</em> identified as a stanza that can be delayed/queued in context of CSI.
+     */
+    @Test
+    public void testCanDelayMUCPresenceWithoutSelfStatusReturnsTrue() throws Exception
+    {
+        // Setup test fixture - a MUC presence for another occupant (no status 110) is not a self-presence and can wait
+        final Packet otherOccupantPresence = parse("""
+            <presence to="user@example.com">
+               <x xmlns="http://jabber.org/protocol/muc#user">
+                  <item affiliation="member" role="participant"/>
+               </x>
+            </presence>""");
+
+        // Execute system under test
+        final boolean result = CsiManager.canDelay(otherOccupantPresence);
+
+        // Verify result
+        assertTrue(result, "MUC presence without status 110 should be delayable");
+    }
+
+    /**
+     * Verifies that a normal message stanza <em>with</em> a body <em>is not</em> identified as a stanza that can be
+     * delayed/queued in context of CSI.
+     */
+    @Test
+    public void testCanDelayNormalMessageWithBodyReturnsFalse() throws Exception
+    {
+        // Setup test fixture - a normal message with a body carries user-visible content and must not be delayed
+        final Packet normalMessageWithBody = parse("""
+            <message type="normal" to="user@example.com">
+               <body>Important content</body>
+            </message>""");
+
+        // Execute system under test
+        final boolean result = CsiManager.canDelay(normalMessageWithBody);
+
+        // Verify result
+        assertFalse(result, "Normal messages with body should not be delayable");
+    }
+
+    /**
+     * Verifies that queueOrPush flushes all stanzas immediately when the CSI delay feature is disabled by configuration,
+     * even when the session is inactive and the packet would ordinarily be delayable.
+     */
+    @Test
+    public void testQueueOrPushFlushesImmediatelyWhenDelayDisabled() throws Exception
+    {
+        // Setup test fixture
+        CsiManager.DELAY_ENABLED.setValue(false);
+        csiManager.deactivate();
+        final Packet delayableMessage = createDelayableMessage();
+
+        // Execute system under test
+        final List<Packet> result = csiManager.queueOrPush(delayableMessage);
+
+        // Verify result
+        assertEquals(1, result.size(), "Should flush immediately when delay is disabled by configuration");
+        assertEquals(0, csiManager.getDelayQueueSize(), "Queue should remain empty when delay is disabled");
+    }
+
+    /**
+     * Verifies that queueOrPush flushes the entire queue when the queue capacity is reached.
+     *
+     * The stanza is added to the queue first, and the check {@code queue.size() >= capacity} is performed after. A
+     * capacity of 2 therefore means that the second enqueued stanza triggers the flush (queue grows to 2 == capacity).
+     */
+    @Test
+    public void testQueueOrPushFlushesWhenQueueCapacityReached() throws Exception
+    {
+        // Setup test fixture - allow exactly 2 stanzas in the queue before a forced flush
+        CsiManager.DELAY_QUEUE_CAPACITY.setValue(2);
+        csiManager.deactivate();
+        final Packet message1 = createDelayableMessage();
+        final Packet message2 = createDelayableMessage();
+
+        // Queue one message - still below capacity, so it must be held
+        assertTrue(csiManager.queueOrPush(message1).isEmpty(), "First message should be queued (below capacity)");
+        assertEquals(1, csiManager.getDelayQueueSize(), "Queue should hold exactly 1 message");
+
+        // Execute system under test - second message reaches the capacity limit and must trigger a flush
+        final List<Packet> result = csiManager.queueOrPush(message2);
+
+        // Verify result
+        assertEquals(2, result.size(), "Flush at capacity should return all queued stanzas");
+        assertEquals(0, csiManager.getDelayQueueSize(), "Queue should be empty after capacity flush");
+    }
+
+    /**
+     * Verifies that queueOrPush flushes the queue when the maximum delay duration has been exceeded.
+     *
+     * A negative max-duration guarantees that {@code lastPush.plus(maxDuration)} lies in the past relative to any call
+     * to {@code Instant.now()}, making the time-based flush trigger fire reliably without sleep-based delays.
+     */
+    @Test
+    public void testQueueOrPushFlushesWhenMaxDurationExceeded() throws Exception
+    {
+        // Setup test fixture - a negative duration ensures the deadline is always already past on every push
+        CsiManager.DELAY_MAX_DURATION.setValue(Duration.ofMillis(-1));
+        csiManager.deactivate();
+        final Packet message1 = createDelayableMessage();
+
+        // Execute system under test - even the very first enqueue should trigger an immediate flush because the
+        // computed deadline (lastPush + negative duration) is always in the past
+        final List<Packet> result = csiManager.queueOrPush(message1);
+
+        // Verify result
+        assertEquals(1, result.size(), "Stanza should be flushed immediately once the max delay duration is exceeded");
+        assertEquals(0, csiManager.getDelayQueueSize(), "Queue should be empty after duration-triggered flush");
     }
 
     /**
