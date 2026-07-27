@@ -1101,6 +1101,141 @@ public class CsiManagerTest
     }
 
     /**
+     * Verifies that a content message with a body removes a queued chat state notification from the same full JID,
+     * and the content message itself is still flushed.
+     */
+    @Test
+    public void testQueueOrPushContentMessageRemovesChatStateFromSameFullJid() throws Exception
+    {
+        // Setup test fixture
+        csiManager.deactivate();
+        final Packet composing = parse("""
+            <message type="chat" from="contact@example.com/mobile" to="user@example.com">
+               <composing xmlns="http://jabber.org/protocol/chatstates"/>
+            </message>""");
+        final Packet contentMessage = parse("""
+            <message type="chat" from="contact@example.com/mobile" to="user@example.com">
+               <body>Hello!</body>
+            </message>""");
+
+        // Queue the chat state notification; it should be held (client is inactive, stanza is delayable).
+        assertTrue(csiManager.queueOrPush(composing).isEmpty(), "Composing notification should be queued");
+        assertEquals(1, csiManager.getDelayQueueSize(), "Queue should hold 1 stanza after enqueue");
+
+        // Execute system under test: a content message arrives from the same full JID.
+        // It must discard the queued chat state and then flush both — but since the composing is discarded,
+        // only the content message itself should appear in the flush result.
+        final List<Packet> flushed = csiManager.queueOrPush(contentMessage);
+
+        // Verify result
+        assertFalse(flushed.contains(composing), "Flushed result must NOT contain the squashed composing notification");
+        assertTrue(flushed.contains(contentMessage), "Flushed result must contain the content message");
+        assertEquals(1, flushed.size(), "Only the content message should be flushed; the composing was discarded");
+    }
+
+    /**
+     * Verifies that a content message with an encrypted element (OMEMO) removes a queued chat state notification
+     * from the same full JID before flushing.
+     */
+    @Test
+    public void testQueueOrPushEncryptedContentMessageRemovesChatStateFromSameFullJid() throws Exception
+    {
+        // Setup test fixture
+        csiManager.deactivate();
+        final Packet composing = parse("""
+            <message type="chat" from="contact@example.com/mobile" to="user@example.com">
+               <composing xmlns="http://jabber.org/protocol/chatstates"/>
+            </message>""");
+        final Packet encryptedMessage = parse("""
+            <message type="chat" from="contact@example.com/mobile" to="user@example.com">
+               <encrypted xmlns="eu.siacs.conversations.axolotl">
+                  <header sid="12345"/>
+               </encrypted>
+            </message>""");
+
+        // Queue the chat state notification.
+        assertTrue(csiManager.queueOrPush(composing).isEmpty(), "Composing notification should be queued");
+        assertEquals(1, csiManager.getDelayQueueSize(), "Queue should hold 1 stanza after enqueue");
+
+        // Execute system under test: an encrypted content message arrives from the same full JID.
+        final List<Packet> flushed = csiManager.queueOrPush(encryptedMessage);
+
+        // Verify result
+        assertFalse(flushed.contains(composing), "Flushed result must NOT contain the squashed composing notification");
+        assertTrue(flushed.contains(encryptedMessage), "Flushed result must contain the encrypted content message");
+        assertEquals(1, flushed.size(), "Only the encrypted message should be flushed; the composing was discarded");
+    }
+
+    /**
+     * Verifies that a content message does NOT remove queued chat state notifications from a different full JID.
+     */
+    @Test
+    public void testQueueOrPushContentMessageDoesNotRemoveChatStateFromDifferentJid() throws Exception
+    {
+        // Setup test fixture
+        csiManager.deactivate();
+        final Packet composingFromAlice = parse("""
+            <message type="chat" from="alice@example.com/mobile" to="user@example.com">
+               <composing xmlns="http://jabber.org/protocol/chatstates"/>
+            </message>""");
+        final Packet contentMessageFromBob = parse("""
+            <message type="chat" from="bob@example.com/mobile" to="user@example.com">
+               <body>Hello!</body>
+            </message>""");
+
+        // Queue Alice's chat state notification.
+        assertTrue(csiManager.queueOrPush(composingFromAlice).isEmpty(), "Alice's composing should be queued");
+        assertEquals(1, csiManager.getDelayQueueSize(), "Queue should hold 1 stanza");
+
+        // Execute system under test: a content message from Bob arrives — must NOT remove Alice's composing.
+        final List<Packet> flushed = csiManager.queueOrPush(contentMessageFromBob);
+
+        // Verify result: Alice's composing is preserved; Bob's message triggered a flush because it is non-delayable.
+        assertTrue(flushed.contains(composingFromAlice), "Alice's composing notification must still be flushed");
+        assertTrue(flushed.contains(contentMessageFromBob), "Bob's content message must also be in the flush result");
+        assertEquals(2, flushed.size(), "Both stanzas should appear in the flush; no cross-JID squashing");
+    }
+
+    /**
+     * Verifies that a content message does not remove other queued stanzas that are NOT chat state notifications
+     * (e.g. a bodyless message with a MUC invite) from the same JID.
+     */
+    @Test
+    public void testQueueOrPushContentMessageDoesNotRemoveNonChatStateMessages() throws Exception
+    {
+        // Setup test fixture
+        csiManager.deactivate();
+        // A MUC invite is not a chat state notification; it happens to be non-delayable but that is beside the point —
+        // the content-message squash rule must only target messages that carry a chatstates element.
+        final Packet composing = parse("""
+            <message type="chat" from="contact@example.com/mobile" to="user@example.com">
+               <composing xmlns="http://jabber.org/protocol/chatstates"/>
+            </message>""");
+        final Packet paused = parse("""
+            <message type="chat" from="contact@example.com/mobile" to="user@example.com">
+               <paused xmlns="http://jabber.org/protocol/chatstates"/>
+            </message>""");
+        final Packet contentMessage = parse("""
+            <message type="chat" from="contact@example.com/mobile" to="user@example.com">
+               <body>Hello!</body>
+            </message>""");
+
+        // Queue both chat state notifications.
+        assertTrue(csiManager.queueOrPush(composing).isEmpty(), "Composing should be queued");
+        assertTrue(csiManager.queueOrPush(paused).isEmpty(), "Paused should be queued");
+        assertEquals(2, csiManager.getDelayQueueSize(), "Queue should hold 2 stanzas");
+
+        // Execute system under test: content message from the same JID squashes both chat states.
+        final List<Packet> flushed = csiManager.queueOrPush(contentMessage);
+
+        // Verify result: both chat states are discarded; only the content message is flushed.
+        assertFalse(flushed.contains(composing), "Composing must have been discarded");
+        assertFalse(flushed.contains(paused), "Paused must have been discarded");
+        assertTrue(flushed.contains(contentMessage), "Content message must be in the flush result");
+        assertEquals(1, flushed.size(), "Only the content message should be flushed");
+    }
+
+    /**
      * Verifies CSI nonza recognition for an 'active' element.
      */
     @Test
