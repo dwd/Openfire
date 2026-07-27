@@ -240,6 +240,21 @@ public class CsiManager
                 && packet.getFrom().equals(queued.getFrom()));
         }
 
+        // If the incoming stanza is a content message (has a body or an encrypted element), discard any queued
+        // chat state notifications (e.g. 'composing') from the same full JID. A content message supersedes all
+        // prior typing indicators from that sender, so delivering them would be misleading.
+        if (packet instanceof Message && packet.getFrom() != null) {
+            final Message incomingMessage = (Message) packet;
+            final boolean isContentMessage = incomingMessage.getBody() != null
+                || !incomingMessage.getElement().elements("encrypted").isEmpty();
+            if (isContentMessage) {
+                queue.removeIf(queued -> queued instanceof Message
+                    && packet.getFrom().equals(queued.getFrom())
+                    && ((Message) queued).getElement().elements().stream()
+                        .anyMatch(el -> "http://jabber.org/protocol/chatstates".equals(el.getNamespaceURI())));
+            }
+        }
+
         queue.add(packet);
 
         final boolean mustPush = !flushingOnActivate // Never flush while activation is in progress, as this can cause out-of-order delivery.
