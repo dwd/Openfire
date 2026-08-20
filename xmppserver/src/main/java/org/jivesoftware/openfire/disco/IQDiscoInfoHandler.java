@@ -26,6 +26,7 @@ import org.jivesoftware.openfire.auth.UnauthorizedException;
 import org.jivesoftware.openfire.cluster.ClusterEventListener;
 import org.jivesoftware.openfire.cluster.ClusterManager;
 import org.jivesoftware.openfire.cluster.NodeID;
+import org.jivesoftware.openfire.entitycaps.EntityCapabilities;
 import org.jivesoftware.openfire.entitycaps.EntityCapabilitiesManager;
 import org.jivesoftware.openfire.handler.IQBlockingHandler;
 import org.jivesoftware.openfire.handler.IQHandler;
@@ -108,6 +109,23 @@ public class IQDiscoInfoHandler extends IQHandler implements ClusterEventListene
         .setDynamic(Boolean.TRUE)
         .build();
 
+    /**
+     * Controls whether inbound disco#info requests that are shaped like a XEP-0115 Entity Capabilities
+     * verification request (i.e. their 'node' attribute is of the form "&lt;uri&gt;#&lt;ver&gt;") may be answered
+     * directly from the Entity Capabilities cache, when the requested 'ver' hash is already known to that cache.
+     * <p>
+     * This is a transparent, safe short-circuit: it is only ever applied for a 'ver' hash that was previously
+     * verified through a genuine disco#info round-trip (see {@link EntityCapabilitiesManager}), and the answer
+     * includes both the baseline XEP-0030 identities/features and any XEP-0128 extended information that was
+     * part of that verified hash. When disabled (the default), such requests are handled as any other disco#info
+     * request, always querying the addressed entity.
+     */
+    public static final SystemProperty<Boolean> ENTITY_CAPS_CACHE_SHORT_CIRCUIT = SystemProperty.Builder.ofType(Boolean.class)
+        .setKey("disco.cache-respond.enable")
+        .setDefaultValue(Boolean.FALSE)
+        .setDynamic(Boolean.TRUE)
+        .build();
+
     public IQDiscoInfoHandler() {
         super("XMPP Disco Info Handler");
         info = new IQHandlerInfo("query", NAMESPACE_DISCO_INFO);
@@ -144,6 +162,19 @@ public class IQDiscoInfoHandler extends IQHandler implements ClusterEventListene
         // we only need to add the requested info to the reply if any otherwise add 
         // a not found error
         IQ reply = IQ.createResultIQ(packet);
+
+        // XEP-0115 Entity Capabilities short-circuit (opt-in, default off): if the request is shaped like a caps
+        // verification request (its 'node' is of the form "<uri>#<ver>") and we already have a verified capability
+        // set cached for that 'ver' hash, answer directly from the cache. This avoids having to wait on (or even
+        // reach) the actual target entity, which may be slow, offline, or otherwise unreachable. This is safe, as
+        // it is only ever applied to a 'ver' hash that was previously verified through a genuine disco#info
+        // round-trip (see EntityCapabilitiesManager#isValid(IQ)).
+        if (ENTITY_CAPS_CACHE_SHORT_CIRCUIT.getValue()) {
+            final IQ cachedReply = tryEntityCapsCacheShortCircuit(packet, reply);
+            if (cachedReply != null) {
+                return cachedReply;
+            }
+        }
 
         // Look for a DiscoInfoProvider associated with the requested entity.
         // We consider the host of the recipient JID of the packet as the entity. It's the 
@@ -258,6 +289,86 @@ public class IQDiscoInfoHandler extends IQHandler implements ClusterEventListene
         }
 
         return reply;
+    }
+
+    /**
+     * Attempts to answer a disco#info request directly from the Entity Capabilities cache, provided that the
+     * request's 'node' is shaped like a XEP-0115 caps verification request ("&lt;uri&gt;#&lt;ver&gt;") and the
+     * 'ver' hash is already known to that cache.
+     *
+     * @param packet the inbound disco#info request.
+     * @param reply a (still empty) IQ result stanza, prepared for the given request.
+     * @return a completed reply if the cache was able to answer the request, otherwise null (in which case the
+     *         request should be handled through the normal disco#info mechanism).
+     */
+    private IQ tryEntityCapsCacheShortCircuit(IQ packet, IQ reply) {
+        final Element iq = packet.getChildElement();
+        if (iq == null) {
+            return null;
+        }
+        final String node = iq.attributeValue("node");
+        if (node == null) {
+            return null;
+        }
+        final int hashIndex = node.lastIndexOf('#');
+        if (hashIndex < 0 || hashIndex == node.length() - 1) {
+            // Not shaped like "<uri>#<ver>" (no '#', or nothing follows it).
+            return null;
+        }
+        final String verHash = node.substring(hashIndex + 1);
+
+        final EntityCapabilitiesManager entityCapabilitiesManager = XMPPServer.getInstance().getEntityCapabilitiesManager();
+        if (entityCapabilitiesManager == null) {
+            return null;
+        }
+        final EntityCapabilities cached = entityCapabilitiesManager.getEntityCapabilitiesByVerHash(verHash);
+        if (cached == null) {
+            // Unknown 'ver' hash: fall back to the normal disco#info handling.
+            return null;
+        }
+
+        Log.trace("Answering disco#info request from '{}' for node '{}' directly from the Entity Capabilities cache.", packet.getFrom(), node);
+
+        reply.setChildElement(iq.createCopy());
+        final Element queryElement = reply.getChildElement();
+
+        for (final String discoIdentity : cached.getIdentities()) {
+            addIdentityElement(queryElement, discoIdentity);
+        }
+
+        for (final String feature : cached.getFeatures()) {
+            queryElement.addElement("feature").addAttribute("var", feature);
+        }
+
+        for (final DataForm form : cached.getExtendedInfo()) {
+            queryElement.add(form.getElement().createCopy());
+        }
+
+        return reply;
+    }
+
+    /**
+     * Reconstructs a disco#info &lt;identity/&gt; element from its flattened 'category/type/lang/name'
+     * representation, as produced by {@code EntityCapabilitiesManager#getIdentitiesFrom(IQ)}.
+     *
+     * @param queryElement the query element to which the identity element is to be added.
+     * @param discoIdentity the flattened identity representation.
+     */
+    private static void addIdentityElement(Element queryElement, String discoIdentity) {
+        final String[] parts = discoIdentity.split("/", 4);
+        final Element identity = queryElement.addElement("identity");
+        if (parts.length > 0 && !parts[0].isEmpty()) {
+            identity.addAttribute("category", parts[0]);
+        }
+        if (parts.length > 1 && !parts[1].isEmpty()) {
+            identity.addAttribute("type", parts[1]);
+        }
+        if (parts.length > 2 && !parts[2].isEmpty()) {
+            identity.addAttribute("xml:lang", parts[2]);
+        }
+        if (parts.length > 3 && !parts[3].isEmpty()) {
+            identity.addAttribute("name", parts[3]);
+        }
     }
 
     /**

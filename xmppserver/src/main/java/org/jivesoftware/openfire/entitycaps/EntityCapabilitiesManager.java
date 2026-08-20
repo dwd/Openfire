@@ -554,6 +554,12 @@ public class EntityCapabilitiesManager extends BasicModule implements IQResultLi
                 caps.addFeature(feature);
             }
 
+            // Store the XEP-0128 extended service discovery forms that were verified as part of the 'ver' hash.
+            List<Element> extendedForms = getExtendedFormElementsFrom(packet);
+            for (Element extendedForm : extendedForms) {
+                caps.addExtendedInfo(extendedForm);
+            }
+
             Log.trace( "Received response to querying 'ver'. Caps now recognized. Received response from: {}", packet.getFrom() );
             registerCapabilities( packet.getFrom(), caps );
         }
@@ -738,6 +744,67 @@ public class EntityCapabilitiesManager extends BasicModule implements IQResultLi
             }
         }
         return results;
+    }
+
+    /**
+     * Extracts the XEP-0128 extended service discovery information (data form) elements from an IQ packet that
+     * are guaranteed to be covered by the XEP-0115 §5.4 'ver' hash computation (i.e. those forms that carry a
+     * FORM_TYPE field of type 'hidden' with a non-empty value, mirroring the filter applied by
+     * {@link #getExtendedDataForms(IQ)}).
+     *
+     * @param packet the packet
+     * @return a list of (cloned) data form elements.
+     */
+    private static List<Element> getExtendedFormElementsFrom(IQ packet) {
+        List<Element> results = new ArrayList<>();
+        Element query = packet.getChildElement();
+        if (query == null) {
+            return results;
+        }
+        Iterator<Element> extensionIterator = query.elementIterator(QName.get("x", "jabber:x:data"));
+        if (extensionIterator != null) {
+            while (extensionIterator.hasNext()) {
+                Element extensionElement = extensionIterator.next();
+
+                Element formTypeField = null;
+                Iterator<Element> fieldCheckIterator = extensionElement.elementIterator("field");
+                while (fieldCheckIterator != null && fieldCheckIterator.hasNext()) {
+                    Element fieldEl = fieldCheckIterator.next();
+                    if ("FORM_TYPE".equals(fieldEl.attributeValue("var"))) {
+                        formTypeField = fieldEl;
+                        break;
+                    }
+                }
+
+                if (formTypeField == null || !"hidden".equals(formTypeField.attributeValue("type"))) {
+                    // Ignore this form as per XEP-0115 §5.4 item 3f.
+                    continue;
+                }
+                final String formTypeValue = formTypeField.element("value") == null ? null : formTypeField.element("value").getText();
+                if (formTypeValue == null || formTypeValue.isEmpty()) {
+                    // Ignore this form (not _explicitly_ defined in XEP-0115 §5.4 item 3f, but seems close enough).
+                    continue;
+                }
+
+                results.add(extensionElement.createCopy());
+            }
+        }
+        return results;
+    }
+
+    /**
+     * Returns the entity capabilities that are cached for a particular 'ver' hash, without regard for which (if
+     * any) entity most recently advertised that hash.
+     *
+     * As caps are hash-addressed (the whole point of XEP-0115 being that identical capability sets share the same
+     * hash), any entity that presents this 'ver' hash is guaranteed to have this exact set of capabilities,
+     * assuming the hash was legitimately verified when it was first added to the cache (see {@link #isValid(IQ)}).
+     *
+     * @param verHash a 'ver' hash (cannot be null).
+     * @return the cached entity capabilities for the hash, or null if the hash is not (yet, or no longer) cached.
+     */
+    public EntityCapabilities getEntityCapabilitiesByVerHash(@Nonnull String verHash) {
+        return entityCapabilitiesMap.get(verHash);
     }
 
     /**
