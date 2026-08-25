@@ -46,6 +46,7 @@ import org.jivesoftware.openfire.nio.NettyXMPPDecoder;
 import org.jivesoftware.openfire.nio.NewConnectionRateLimitHandler;
 import org.jivesoftware.openfire.nio.QuicClientConnectionHandler;
 import org.jivesoftware.openfire.nio.QuicConnectionId;
+import org.jivesoftware.openfire.nio.QuicCloseMonitor;
 import org.jivesoftware.openfire.nio.QuicServerConnectionHandler;
 import org.jivesoftware.openfire.nio.QuicSessionRegistry;
 import org.jivesoftware.openfire.nio.QuicSessionStreamRouter;
@@ -188,7 +189,7 @@ public class QuicMultiplexedConnectionAcceptor extends ConnectionAcceptor
                 .initialMaxStreamsBidirectional(initialMaxStreamsBidi)
                 // Allow unidirectional streams for HTTP/3 control streams (SETTINGS, QPACK encoder/decoder).
                 .initialMaxStreamsUnidirectional(webTransportEnabled ? 1024 : 0)
-                .handler(buildConnectionHandler())
+                .handler(buildConnectionHandler(maxIdleTimeoutMs))
                 .streamHandler(buildStreamHandler());
 
             final String qlogDir = QuicConnectionAcceptor.QUIC_QLOG_DIR.getValue();
@@ -239,7 +240,7 @@ public class QuicMultiplexedConnectionAcceptor extends ConnectionAcceptor
      * Builds the per-{@link QuicChannel} handler that handles connection-level events
      * (registration, migration, logging) and routes streams by ALPN.
      */
-    private ChannelInitializer<QuicChannel> buildConnectionHandler()
+    private ChannelInitializer<QuicChannel> buildConnectionHandler(final long maxIdleTimeoutMs)
     {
         return new ChannelInitializer<QuicChannel>()
         {
@@ -252,6 +253,7 @@ public class QuicMultiplexedConnectionAcceptor extends ConnectionAcceptor
                     ch.remoteSocketAddress(), negotiatedAlpn(ch));
 
                 ch.pipeline()
+                    .addLast("quicCloseMonitor", new QuicCloseMonitor(maxIdleTimeoutMs))
                     .addLast(new NewConnectionRateLimitHandler(ConnectionType.SOCKET_C2S))
                     .addLast(new ChannelInboundHandlerAdapter()
                     {
@@ -285,10 +287,7 @@ public class QuicMultiplexedConnectionAcceptor extends ConnectionAcceptor
                         public void channelInactive(final ChannelHandlerContext ctx) throws Exception
                         {
                             final QuicChannel qc = (QuicChannel) ctx.channel();
-                            final String alpn = negotiatedAlpn(qc);
                             sessionRegistry.unregister(new QuicConnectionId(qc.id()));
-                            Log.info("QUIC connection closed: remote={}, ALPN='{}'",
-                                qc.remoteSocketAddress(), alpn);
                             super.channelInactive(ctx);
                         }
 

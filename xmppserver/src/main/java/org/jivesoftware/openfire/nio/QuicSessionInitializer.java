@@ -204,6 +204,8 @@ public class QuicSessionInitializer
             .connect()
             .get();
 
+        quicChannel.pipeline().addFirst("quicCloseMonitor", new QuicCloseMonitor(maxIdleTimeoutMs));
+
         Log.debug("QUIC connection to {}:{} established. Opening bidirectional stream.", host, port);
 
         // Open a client-initiated bidirectional stream for the XMPP session.

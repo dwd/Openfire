@@ -46,6 +46,7 @@ import org.jivesoftware.openfire.nio.NettyConnectionHandler;
 import org.jivesoftware.openfire.nio.NettyXMPPDecoder;
 import org.jivesoftware.openfire.nio.NewConnectionRateLimitHandler;
 import org.jivesoftware.openfire.nio.QuicClientConnectionHandler;
+import org.jivesoftware.openfire.nio.QuicCloseMonitor;
 import org.jivesoftware.openfire.nio.QuicConnectionId;
 import org.jivesoftware.openfire.nio.QuicSessionRegistry;
 import org.jivesoftware.openfire.nio.QuicSessionStreamRouter;
@@ -197,6 +198,7 @@ public class QuicConnectionAcceptor extends ConnectionAcceptor
                     protected void initChannel(final QuicChannel ch)
                     {
                         ch.pipeline()
+                            .addLast("quicCloseMonitor", new QuicCloseMonitor(maxIdleTimeoutMs))
                             .addLast(new NewConnectionRateLimitHandler(ConnectionType.QUIC_C2S))
                             .addLast(new ChannelInboundHandlerAdapter()
                             {
@@ -222,7 +224,6 @@ public class QuicConnectionAcceptor extends ConnectionAcceptor
                                 {
                                     final QuicChannel qc = (QuicChannel) ctx.channel();
                                     sessionRegistry.unregister(new QuicConnectionId(qc.id()));
-                                    Log.info("QUIC connection closed: remote={}", qc.remoteSocketAddress());
                                     super.channelInactive(ctx);
                                 }
 
