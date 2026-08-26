@@ -547,20 +547,21 @@ public class QuicMultiplexedConnectionAcceptor extends ConnectionAcceptor
                         }
                     });
                     pipeline.addAfter(blockingHandlerExecutor, "autoReadEnabler", "businessLogicHandler", businessLogicHandler);
+
+                    // Detach and release the accumulation buffer before removing this handler.
+                    // Otherwise handlerRemoved() releases prefixBuf and the code below releases
+                    // the same buffer a second time.
+                    final ByteBuf leftover = buf.isReadable() ? buf.copy() : null;
+                    prefixBuf = null;
+                    buf.release();
                     pipeline.remove(this);
 
                     // Re-fire channelActive so the XMPP handler initialises its session.
                     ctx.fireChannelActive();
 
                     // Re-inject any remaining bytes (the actual XMPP payload).
-                    if (buf.isReadable()) {
-                        final ByteBuf leftover = buf.copy();
-                        prefixBuf = null;
-                        buf.release();
+                    if (leftover != null) {
                         ctx.fireChannelRead(leftover);
-                    } else {
-                        prefixBuf = null;
-                        buf.release();
                     }
                 }
 
