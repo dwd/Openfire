@@ -434,7 +434,7 @@ public class QuicSessionStreamRouter
                                 if (self.isWebTransportSession()) {
                                     final long sessionId = self.getWebTransportSessionId();
                                     final io.netty.buffer.ByteBuf prefix = ctx.alloc().buffer(10);
-                                    prefix.writeByte(0x41); // WEBTRANSPORT_STREAM signal value
+                                    writeVarInt(prefix, 0x41); // WEBTRANSPORT_STREAM signal value
                                     writeVarInt(prefix, sessionId);
                                     ctx.channel().write(prefix);
                                     Log.debug("WebTransport outbound stream {}: wrote 0x41 + session_id={} prefix.",

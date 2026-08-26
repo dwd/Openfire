@@ -503,12 +503,13 @@ public class QuicMultiplexedConnectionAcceptor extends ConnectionAcceptor
                     final ByteBuf buf = prefixBuf;
                     buf.markReaderIndex();
 
-                    // Read signal value (must be 0x41).
-                    if (!buf.isReadable()) { buf.resetReaderIndex(); return; }
-                    final int first = buf.readUnsignedByte();
-                    if (first != 0x41) {
-                        Log.warn("WebTransport data stream {}: unexpected first byte 0x{} (expected 0x41); closing.",
-                            channel.streamId(), Integer.toHexString(first));
+                    // Read the WEBTRANSPORT_STREAM signal as a QUIC varint. Its value is
+                    // 0x41, which is encoded in two bytes (0x40 0x41), not as a literal byte.
+                    final long streamType = readVarInt(buf);
+                    if (streamType < 0) { buf.resetReaderIndex(); return; }
+                    if (streamType != 0x41) {
+                        Log.warn("WebTransport data stream {}: unexpected stream type 0x{} (expected 0x41); closing.",
+                            channel.streamId(), Long.toHexString(streamType));
                         ctx.close();
                         return;
                     }
