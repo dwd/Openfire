@@ -524,6 +524,9 @@ public class QuicMultiplexedConnectionAcceptor extends ConnectionAcceptor
                         channel.streamId(), sessionId);
 
                     // Prefix consumed — install XMPP pipeline and remove self.
+                    // Pause reads while the business-logic handler initialises. The
+                    // autoReadEnabler below resumes them when that is complete.
+                    channel.config().setAutoRead(false);
                     final io.netty.channel.ChannelPipeline pipeline = ctx.pipeline();
                     pipeline.addAfter(ctx.name(), TRAFFIC_HANDLER_NAME, new io.netty.handler.traffic.ChannelTrafficShapingHandler(0));
                     pipeline.addAfter(TRAFFIC_HANDLER_NAME, "xmppDecoder", new NettyXMPPDecoder());
@@ -542,7 +545,7 @@ public class QuicMultiplexedConnectionAcceptor extends ConnectionAcceptor
                             super.channelActive(ctx2);
                         }
                     });
-                    pipeline.addAfter("autoReadEnabler", "businessLogicHandler", businessLogicHandler);
+                    pipeline.addAfter(blockingHandlerExecutor, "autoReadEnabler", "businessLogicHandler", businessLogicHandler);
                     pipeline.remove(this);
 
                     // Re-fire channelActive so the XMPP handler initialises its session.
@@ -592,10 +595,11 @@ public class QuicMultiplexedConnectionAcceptor extends ConnectionAcceptor
                         default: return -1;
                     }
                 }
-            })
-            .addLast(blockingHandlerExecutor, "businessLogicHandler", businessLogicHandler);
+            });
 
-        channel.config().setAutoRead(false);
+        // The prefix stripper must be able to receive the first bytes. It switches auto-read
+        // off after validating the prefix, while the XMPP session is being initialised.
+        channel.config().setAutoRead(true);
     }
 
     /**
