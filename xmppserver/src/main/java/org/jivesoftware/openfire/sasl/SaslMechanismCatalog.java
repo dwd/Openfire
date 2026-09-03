@@ -142,6 +142,20 @@ public class SaslMechanismCatalog
     }
 
     /**
+     * Returns whether a mechanism may be evaluated while processing replayable TLS 1.3 early data.
+     *
+     * <p>This is deliberately a small, conservative first-cut policy. It is expected to be replaced by mechanism
+     * metadata when that is introduced.</p>
+     *
+     * @param mechanismName the normalized mechanism name (cannot be null).
+     * @return true for SCRAM and FAST mechanisms only.
+     */
+    public static boolean isEarlyDataCapable(@Nonnull final String mechanismName)
+    {
+        return MechanismName.isScram(mechanismName) || MechanismName.isFast(mechanismName);
+    }
+
+    /**
      * Adds a new SASL mechanism to the list of supported SASL mechanisms by the server. The
      * new mechanism will be offered to clients and connection managers as stream features.<p>
      *

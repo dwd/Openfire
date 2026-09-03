@@ -268,6 +268,18 @@ public class SaslMechanismCatalogTest
         assertFalse(SaslMechanismCatalog.isEnabled("NOT-A-MECHANISM"), "A mechanism that configuration does not name must not be reported as enabled.");
     }
 
+    @Test
+    public void testEarlyDataCapabilityIsLimitedToScramAndFast()
+    {
+        assertTrue(SaslMechanismCatalog.isEarlyDataCapable("SCRAM-SHA-256"));
+        assertTrue(SaslMechanismCatalog.isEarlyDataCapable("SCRAM-SHA-256-PLUS"));
+        assertTrue(SaslMechanismCatalog.isEarlyDataCapable("HT2-SHA-256-NONE"));
+        assertTrue(SaslMechanismCatalog.isEarlyDataCapable("HT2-SHA-256-EXPR"));
+        assertFalse(SaslMechanismCatalog.isEarlyDataCapable("PLAIN"));
+        assertFalse(SaslMechanismCatalog.isEarlyDataCapable("EXTERNAL"));
+        assertFalse(SaslMechanismCatalog.isEarlyDataCapable("OAUTHBEARER"));
+    }
+
     /**
      * Changing the configured mechanisms replaces the registry rather than adding to it, so that a mechanism an
      * administrator has removed stops being offered.

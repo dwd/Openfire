@@ -582,6 +582,11 @@ public class SASLAuthentication {
 
                     final String mechanismName = doc.attributeValue( "mechanism" ).toUpperCase();
 
+                    if (session.isEarlyData() && !SaslMechanismCatalog.isEarlyDataCapable(mechanismName)) {
+                        throw new SaslFailureException(Failure.INVALID_MECHANISM,
+                            "The mechanism cannot be used with TLS 1.3 early data.");
+                    }
+
                     if (MechanismName.isFast(mechanismName) && !usingSASL2) {
                         throw new SaslFailureException(Failure.INVALID_MECHANISM,
                             "FAST mechanisms can only be negotiated with SASL2.");
@@ -795,7 +800,7 @@ public class SASLAuthentication {
         if (!ENABLE_SASL2.getValue()) {
             return Optional.of(Failure.NOT_AUTHORIZED);
         }
-        if (SASL2_REQUIRE_TLS.getValue() && !session.isEncrypted()) {
+        if (SASL2_REQUIRE_TLS.getValue() && !session.isEncrypted() && !session.isEarlyData()) {
             return Optional.of(Failure.ENCRYPTION_REQUIRED);
         }
         return Optional.empty();

@@ -158,6 +158,11 @@ public final class FastRequest
             invalidate = "true".equalsIgnoreCase(invalidateAttr) || "1".equals(invalidateAttr);
         }
 
+        if (isFastAuth && session.isEarlyData() && replayCount == null) {
+            throw new SaslFailureException(Failure.MALFORMED_REQUEST,
+                "FAST authentication in TLS 1.3 early data requires a replay counter");
+        }
+
         return new FastRequest(expectedUsername, clientId, requestedMechanism, replayCount, invalidate);
     }
 

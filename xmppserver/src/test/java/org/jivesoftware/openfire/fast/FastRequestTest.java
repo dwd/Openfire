@@ -378,8 +378,7 @@ class FastRequestTest
     }
 
     /**
-     * An absent counter is permitted: XEP-0484 requires one only for requests carried in TLS 0-RTT early data, which
-     * Openfire does not accept.
+     * An absent counter is permitted outside TLS 0-RTT early data.
      */
     @Test
     void anAbsentReplayCounterIsPermitted() throws Exception
@@ -394,6 +393,32 @@ class FastRequestTest
         // Verify result.
         assertNotNull(result, "A FAST authentication without a counter must be accepted.");
         assertNull(result.getReplayCount(), "No counter may be reported when the client supplied none.");
+    }
+
+    @Test
+    void anAbsentReplayCounterIsRejectedInEarlyData() throws Exception
+    {
+        final LocalClientSession session = session(USERNAME);
+        when(session.isEarlyData()).thenReturn(true);
+        FastSessionState.setAdvertisedMechanisms(session, Set.of(OFFERED));
+
+        final SaslFailureException error = assertThrows(SaslFailureException.class,
+            () -> FastRequest.from(authenticate(fast("")), OFFERED, USER_AGENT_ID, session));
+
+        assertEquals(Failure.MALFORMED_REQUEST, error.getFailure());
+    }
+
+    @Test
+    void aReplayCounterPermitsFastAuthenticationInEarlyData() throws Exception
+    {
+        final LocalClientSession session = session(USERNAME);
+        when(session.isEarlyData()).thenReturn(true);
+        FastSessionState.setAdvertisedMechanisms(session, Set.of(OFFERED));
+
+        final FastRequest result = FastRequest.from(authenticate(fast(" count='1'")), OFFERED,
+            USER_AGENT_ID, session);
+
+        assertEquals(1L, result.getReplayCount());
     }
 
     /**
