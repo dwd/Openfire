@@ -92,7 +92,9 @@ public class QuicClientConnectionHandler extends NettyClientConnectionHandler
     NettyConnection createNettyConnection(final ChannelHandlerContext ctx)
     {
         final NettyConnection connection = super.createNettyConnection(ctx);
-        connection.setEncrypted(true); // QUIC always runs on top of TLS.
+        // A QUIC stream can become readable before the TLS 1.3 handshake completes when it carries 0-RTT data.
+        // NettyConnection observes the parent QuicChannel's SSL session to promote this to encrypted (1-RTT) state.
+        connection.setEarlyData(true);
         if (streamRouter != null) {
             streamRouter.registerInboundConnection(connection);
         }

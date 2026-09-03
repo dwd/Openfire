@@ -91,7 +91,8 @@ public class NettyConnection extends AbstractConnection
      * closed.
      */
     private final AtomicReference<State> state = new AtomicReference<>(State.OPEN);
-    private boolean isEncrypted = false;
+    private volatile boolean isEncrypted = false;
+    private volatile boolean isEarlyData = false;
 
     private ChannelBindingProviderManager channelBindingProviderManager; // TODO allow this to be set for unit testing.
 
@@ -374,11 +375,42 @@ public class NettyConnection extends AbstractConnection
 
     @Override
     public boolean isEncrypted() {
+        if (isEarlyData && isQuicHandshakeComplete()) {
+            return true;
+        }
         return isEncrypted;
     }
 
     public void setEncrypted(boolean encrypted) {
         isEncrypted = encrypted;
+        if (encrypted) {
+            isEarlyData = false;
+        }
+    }
+
+    @Override
+    public boolean isEarlyData() {
+        return isEarlyData && !isQuicHandshakeComplete();
+    }
+
+    private boolean isQuicHandshakeComplete() {
+        for (Channel channel = channelHandlerContext.channel(); channel != null; channel = channel.parent()) {
+            if (channel instanceof QuicChannel quicChannel && quicChannel.sslEngine() != null) {
+                // Netty's QUIC SSLSession is populated atomically when the TLS handshake completes.
+                return quicChannel.sslEngine().getSession().getProtocol() != null;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Updates whether inbound data is TLS 1.3 early data. Early data and fully secured data are mutually exclusive.
+     */
+    public void setEarlyData(boolean earlyData) {
+        isEarlyData = earlyData;
+        if (earlyData) {
+            isEncrypted = false;
+        }
     }
 
     @Override

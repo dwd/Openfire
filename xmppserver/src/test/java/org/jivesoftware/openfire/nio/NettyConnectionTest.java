@@ -18,6 +18,7 @@ package org.jivesoftware.openfire.nio;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.quic.QuicChannel;
+import org.jivesoftware.openfire.session.ConnectionSettings;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.InvocationHandler;
@@ -30,10 +31,32 @@ import java.net.UnknownHostException;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class NettyConnectionTest
 {
+    @Test
+    public void shouldDisableTlsEarlyDataByDefault()
+    {
+        assertFalse(ConnectionSettings.TLS_EARLY_DATA_ENABLED.getDefaultValue());
+    }
+
+    @Test
+    public void shouldKeepEarlyDataAndEncryptedStatesMutuallyExclusive()
+    {
+        final NettyConnection connection = createConnection(new SocketAddress() {}, (Channel) null);
+
+        connection.setEarlyData(true);
+        assertTrue(connection.isEarlyData());
+        assertFalse(connection.isEncrypted());
+
+        connection.setEncrypted(true);
+        assertFalse(connection.isEarlyData());
+        assertTrue(connection.isEncrypted());
+    }
+
     @Test
     public void shouldResolveAddressFromDirectRemoteAddress() throws Exception
     {

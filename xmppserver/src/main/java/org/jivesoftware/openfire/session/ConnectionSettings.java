@@ -24,6 +24,16 @@ import java.util.List;
 
 public final class ConnectionSettings {
 
+    /**
+     * Allows TLS 1.3 clients to send replayable application data before the handshake completes. This is disabled by
+     * default and is intentionally not dynamic: listeners must be restarted to create TLS contexts with the new value.
+     */
+    public static final SystemProperty<Boolean> TLS_EARLY_DATA_ENABLED = SystemProperty.Builder.ofType(Boolean.class)
+        .setKey("xmpp.tls.early-data.enabled")
+        .setDefaultValue(Boolean.FALSE)
+        .setDynamic(Boolean.FALSE)
+        .build();
+
     private ConnectionSettings() {
     }
 

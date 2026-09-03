@@ -29,7 +29,7 @@ import java.time.Duration;
  * S2S business-logic handler for QUIC channels.
  *
  * <p>QUIC provides TLS 1.3 as an integral part of its transport layer. This handler therefore
- * marks every new {@link NettyConnection} as already-encrypted and delegates to
+ * tracks whether each new {@link NettyConnection} is carrying early data or post-handshake data and delegates to
  * {@link QuicServerStanzaHandler}, which suppresses the STARTTLS upgrade path and drives
  * SASL EXTERNAL authentication using the X.509 certificate presented during the QUIC/TLS
  * handshake.</p>
@@ -73,10 +73,8 @@ public class QuicServerConnectionHandler extends NettyServerConnectionHandler
     NettyConnection createNettyConnection(final ChannelHandlerContext ctx)
     {
         final NettyConnection connection = super.createNettyConnection(ctx);
-        // QUIC always runs on top of TLS 1.3; mark the connection as encrypted so that
-        // SASLAuthentication.getSASLMechanismsElement(LocalIncomingServerSession) offers
-        // SASL EXTERNAL without waiting for a STARTTLS upgrade.
-        connection.setEncrypted(true);
+        // A QUIC stream can become readable before the TLS 1.3 handshake completes when it carries 0-RTT data.
+        connection.setEarlyData(true);
         return connection;
     }
 

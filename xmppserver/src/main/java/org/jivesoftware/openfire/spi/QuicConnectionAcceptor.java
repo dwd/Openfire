@@ -355,6 +355,7 @@ public class QuicConnectionAcceptor extends ConnectionAcceptor
     {
         final EncryptionArtifactFactory encryptionArtifactFactory = new EncryptionArtifactFactory(configuration);
         final QuicSslContextBuilder builder = QuicSslContextBuilder.forServer(encryptionArtifactFactory.getKeyManagerFactory(), null);
+        builder.earlyData(ConnectionSettings.TLS_EARLY_DATA_ENABLED.getValue());
         final List<String> alpnValues = ConnectionSettings.Client.QUIC_ALPN.getValue();
         if (alpnValues.isEmpty()) {
             throw new IllegalStateException("No ALPN values are configured for QUIC. Configure at least one value in xmpp.quic.client.alpn.");
