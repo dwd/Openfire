@@ -27,6 +27,7 @@ import org.jivesoftware.openfire.auth.UnauthorizedException;
 import org.jivesoftware.openfire.cluster.ClusterManager;
 import org.jivesoftware.openfire.csi.CsiManager;
 import org.jivesoftware.openfire.entitycaps.EntityCapabilitiesManager;
+import org.jivesoftware.openfire.net.InitialAuthenticationPipelining;
 import org.jivesoftware.openfire.net.SaslStreamFeatures;
 import org.jivesoftware.openfire.nio.XMLLightweightParser;
 import org.jivesoftware.openfire.privacy.PrivacyList;
@@ -921,6 +922,7 @@ public class LocalClientSession extends LocalSession implements ClientSession {
             result.add(limits);
         }
 
+        InitialAuthenticationPipelining.appendConfigVersion(this, result);
         return result;
     }
 
