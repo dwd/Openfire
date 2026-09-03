@@ -555,6 +555,12 @@ public class SASLAuthentication {
                 if (!usingSASL2) {
                     throw new IllegalStateException("Unexpected data received while negotiating SASL2 authentication. Name of the offending root element: " + doc.getName() + " Namespace: " + doc.getNamespaceURI());
                 }
+                if (!InitialAuthenticationPipelining.isConfigVersionValid(session, doc)) {
+                    Log.debug("Rejecting an IAP authentication request with a stale or unadvertised config-version for session '{}'.", session);
+                    InitialAuthenticationPipelining.sendConfigVersionMismatch(session);
+                    session.removeSessionData("SaslServer");
+                    return Status.failed;
+                }
             } else if (elementType == ElementType.AUTH && usingSASL2) {
                 throw new IllegalStateException( "Unexpected data received while negotiating SASL2 authentication. Name of the offending root element: " + doc.getName() + " Namespace: " + doc.getNamespaceURI() );
             }

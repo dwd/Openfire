@@ -1679,7 +1679,8 @@ public class SASLAuthenticationTest
     public void getSASLMechanismsShouldIncludeIapConfigVersionWhenIapIsEnabled()
     {
         JiveGlobals.setProperty("xmpp.auth.iap", "true");
-        SASLAuthentication.ENABLE_SASL2.setValue(false); // keep it simple: SASL1 only
+        SASLAuthentication.ENABLE_SASL2.setValue(true);
+        SASLAuthentication.SASL2_REQUIRE_TLS.setValue(false);
         SASLAuthentication.setEnabledMechanisms(Collections.singletonList("PLAIN"));
 
         final Connection connection = mock(Connection.class);
@@ -1687,7 +1688,7 @@ public class SASLAuthenticationTest
         final StreamID streamID = new BasicStreamIDFactory().createStreamID();
         final LocalClientSession session = new LocalClientSession(Fixtures.XMPP_DOMAIN, connection, streamID, Locale.ENGLISH);
 
-        final List<Element> features = SASLAuthentication.getSASLMechanisms(session);
+        final List<Element> features = iapStreamFeatures(session);
 
         final boolean hasConfigVersion = features.stream()
             .anyMatch(e -> "config-version".equals(e.getName())
@@ -1709,7 +1710,7 @@ public class SASLAuthenticationTest
         final StreamID streamID = new BasicStreamIDFactory().createStreamID();
         final LocalClientSession session = new LocalClientSession(Fixtures.XMPP_DOMAIN, connection, streamID, Locale.ENGLISH);
 
-        final List<Element> features = SASLAuthentication.getSASLMechanisms(session);
+        final List<Element> features = iapStreamFeatures(session);
 
         final boolean hasConfigVersion = features.stream()
             .anyMatch(e -> "config-version".equals(e.getName())
@@ -1748,6 +1749,8 @@ public class SASLAuthenticationTest
     public void iapConfigVersionShouldBeStableForEquivalentSessions()
     {
         JiveGlobals.setProperty("xmpp.auth.iap", "true");
+        SASLAuthentication.ENABLE_SASL2.setValue(true);
+        SASLAuthentication.SASL2_REQUIRE_TLS.setValue(false);
         SASLAuthentication.setEnabledMechanisms(Collections.singletonList("PLAIN"));
 
         final Connection connection = mock(Connection.class);
@@ -1757,8 +1760,8 @@ public class SASLAuthenticationTest
         final LocalClientSession session1 = new LocalClientSession(Fixtures.XMPP_DOMAIN, connection, streamID1, Locale.ENGLISH);
         final LocalClientSession session2 = new LocalClientSession(Fixtures.XMPP_DOMAIN, connection, streamID2, Locale.ENGLISH);
 
-        final List<Element> features1 = SASLAuthentication.getSASLMechanisms(session1);
-        final List<Element> features2 = SASLAuthentication.getSASLMechanisms(session2);
+        final List<Element> features1 = iapStreamFeatures(session1);
+        final List<Element> features2 = iapStreamFeatures(session2);
 
         final String cv1 = features1.stream()
             .filter(e -> "config-version".equals(e.getName()))
@@ -1827,7 +1830,7 @@ public class SASLAuthenticationTest
         final LocalClientSession session = new LocalClientSession(Fixtures.XMPP_DOMAIN, connection, streamID, Locale.ENGLISH);
 
         // Compute the correct config-version for this session.
-        final List<Element> features = SASLAuthentication.getSASLMechanisms(session);
+        final List<Element> features = iapStreamFeatures(session);
         final String correctVersion = features.stream()
             .filter(e -> "config-version".equals(e.getName()))
             .findFirst().map(e -> e.attributeValue("value")).orElseThrow();
@@ -1884,6 +1887,14 @@ public class SASLAuthenticationTest
         final Element auth = DocumentHelper.createElement(new QName("auth", Namespace.get("", SASL_NAMESPACE)));
         auth.addAttribute("mechanism", mechanism);
         return auth;
+    }
+
+    private static List<Element> iapStreamFeatures(final LocalClientSession session)
+    {
+        final List<Element> features = new ArrayList<>();
+        SaslStreamFeatures.appendSASLFeatures(session, features);
+        InitialAuthenticationPipelining.appendConfigVersion(session, features);
+        return features;
     }
 
     private static Element responseElement(final String value)

@@ -25,6 +25,7 @@ import org.dom4j.io.XMPPPacketReader;
 import org.jivesoftware.openfire.*;
 import org.jivesoftware.openfire.auth.UnauthorizedException;
 import org.jivesoftware.openfire.multiplex.UnknownStanzaException;
+import org.jivesoftware.openfire.net.InitialAuthenticationPipelining;
 import org.jivesoftware.openfire.net.MXParser;
 import org.jivesoftware.openfire.net.SaslStreamFeatures;
 import org.jivesoftware.openfire.net.VirtualConnection;
@@ -240,6 +241,7 @@ public class HttpSession extends LocalClientSession {
         session.addElement("optional");
         elements.add(session);
 
+        InitialAuthenticationPipelining.appendConfigVersion(this, elements);
         return elements;
     }
 
