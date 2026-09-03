@@ -899,6 +899,36 @@ public class SASLAuthenticationTest
         assertTrue(response.getValue().contains("<encryption-required"), "Expected an encryption-required condition when TLS is required but absent.");
     }
 
+    @Test
+    public void shouldPermitSasl2InEarlyDataWhenTlsIsRequired()
+    {
+        SASLAuthentication.ENABLE_SASL2.setValue(true);
+        SASLAuthentication.SASL2_REQUIRE_TLS.setValue(true);
+        final Connection connection = mock(Connection.class);
+        when(connection.isEarlyData()).thenReturn(true);
+        final LocalClientSession session = new LocalClientSession(Fixtures.XMPP_DOMAIN, connection,
+            new BasicStreamIDFactory().createStreamID(), Locale.ENGLISH);
+
+        assertTrue(SASLAuthentication.checkSASL2Permitted(session).isEmpty());
+    }
+
+    @Test
+    public void shouldRejectPlainAuthenticationInEarlyData()
+    {
+        SASLAuthentication.ENABLE_SASL2.setValue(true);
+        final Connection connection = mock(Connection.class);
+        when(connection.isEarlyData()).thenReturn(true);
+        final LocalClientSession session = new LocalClientSession(Fixtures.XMPP_DOMAIN, connection,
+            new BasicStreamIDFactory().createStreamID(), Locale.ENGLISH);
+        SASLAuthentication.setAdvertisedSASLMechanisms(session, Set.of("PLAIN"));
+
+        assertEquals(SASLAuthentication.Status.failed,
+            SASLAuthentication.handle(session, sasl2AuthenticateElement("PLAIN"), true));
+        final ArgumentCaptor<String> response = ArgumentCaptor.forClass(String.class);
+        verify(connection).deliverRawText(response.capture());
+        assertTrue(response.getValue().contains("invalid-mechanism"));
+    }
+
     /**
      * Verifies that a SASL2 authentication request is accepted (negotiation proceeds) when SASL2 is enabled and the
      * session is encrypted.
