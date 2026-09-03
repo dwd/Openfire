@@ -290,6 +290,18 @@ public interface Connection extends Closeable {
     boolean isEncrypted();
 
     /**
+     * Returns true while the connection is processing TLS 1.3 early data.
+     *
+     * <p>Early data is encrypted, but is not considered secured by {@link #isEncrypted()} as it can be replayed.
+     * Implementations that do not support TLS 1.3 early data return {@code false}.</p>
+     *
+     * @return true if replayable TLS 1.3 early data is being processed.
+     */
+    default boolean isEarlyData() {
+        return false;
+    }
+
+    /**
      * Registers a listener for close event notification. Registrations after
      * the Session is closed will be immediately notified <em>before</em>
      * the registration call returns (within the context of the

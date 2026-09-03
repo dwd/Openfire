@@ -174,6 +174,15 @@ public interface Session extends RoutableChannelHandler {
     boolean isEncrypted();
 
     /**
+     * Returns true while this session is processing replayable TLS 1.3 early data.
+     *
+     * @return true if TLS 1.3 early data is being processed.
+     */
+    default boolean isEarlyData() {
+        return false;
+    }
+
+    /**
      * Returns true if this session is authenticated (eg: SASL or Dialback authentication has completed successfully).
      *
      * @return true if the session is authenticated.

@@ -731,6 +731,7 @@ public class QuicMultiplexedConnectionAcceptor extends ConnectionAcceptor
         final EncryptionArtifactFactory encFactory = new EncryptionArtifactFactory(c2sConfiguration);
         final QuicSslContextBuilder builder = QuicSslContextBuilder
             .forServer(encFactory.getKeyManagerFactory(), null);
+        builder.earlyData(ConnectionSettings.TLS_EARLY_DATA_ENABLED.getValue());
 
         builder.applicationProtocols(buildAlpnList().toArray(String[]::new));
 

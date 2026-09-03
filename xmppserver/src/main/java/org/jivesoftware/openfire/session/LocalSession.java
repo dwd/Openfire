@@ -574,6 +574,13 @@ public abstract class LocalSession implements Session {
     }
 
     @Override
+    public boolean isEarlyData() {
+        return Optional.ofNullable(conn)
+            .map(Connection::isEarlyData)
+            .orElse(Boolean.FALSE);
+    }
+
+    @Override
     public Certificate[] getPeerCertificates() {
         return Optional.ofNullable(conn)
                 .map(Connection::getPeerCertificates)
