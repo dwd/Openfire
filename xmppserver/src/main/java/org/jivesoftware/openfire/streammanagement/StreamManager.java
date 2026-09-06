@@ -271,8 +271,7 @@ public class StreamManager {
             && session.getConnection().getConfiguration().getType() == org.jivesoftware.openfire.spi.ConnectionType.QUIC_C2S) {
             this.namespace = namespace;
             Log.debug("Rejecting <enable/> for stream management on QUIC connection {} (XEP-0467 §3.3 prohibits XEP-0198 over QUIC).", session);
-            sendUnexpectedError();
-            return;
+            return buildFailedElement(namespace, PacketError.Condition.feature_not_implemented);
         }
         // Ensure that resource binding has occurred.
         if (!session.isAuthenticated()) {
